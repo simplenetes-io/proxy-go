@@ -109,7 +109,7 @@ printf "8888:[1001,2001,3001,9998,9999]" > ./test/ports.cfg
 printf "Docker: removing existing %s container...\n" "${proxy_container_name}"
 docker stop "${proxy_container_name}" && docker rm "${proxy_container_name}"
 printf "Docker: running proxy on port %s..." "${proxy_port}"
-docker run --name "${proxy_container_name}" --network="host" -v "$PWD:/${proxy_container_name}" --workdir=/${proxy_container_name} "${golang_image}" nohup sh -c "go run ./proxy.go ${DOCKER_IP}" &
+docker run --name "${proxy_container_name}" --network="host" -v "$PWD:/${proxy_container_name}" --workdir=/${proxy_container_name} "${golang_image}" nohup sh -c "go run ./src/entrypoint.go ${DOCKER_IP}" &
 sleep 3
 printf " OK\n"
 
@@ -122,7 +122,7 @@ _test_request "${proxy_port}"
 # Send SIGHUP to proxym
 printf "======\n[Docker]\n"
 printf "Docker: sending HUP signal to proxy..."
-docker exec -it "${proxy_container_name}" sh -c "kill -s HUP \$(pgrep exe/proxy)"
+docker exec -it "${proxy_container_name}" sh -c "kill -s HUP \$(pgrep exe/entrypoint)"
 printf " OK\n"
 
 # Repeat sending request and validating response
@@ -134,7 +134,7 @@ printf "======\n[Docker]\n"
 printf "7777:[1001,2001,3001,9998,9999]" > ./test/ports.cfg
 # Send SIGHUP to proxy
 printf "Docker: sending HUP signal to proxy..."
-docker exec -it "${proxy_container_name}" sh -c "kill -s HUP \$(pgrep exe/proxy)"
+docker exec -it "${proxy_container_name}" sh -c "kill -s HUP \$(pgrep exe/entrypoint)"
 printf " OK\n"
 
 # Send request to previous proxy port,
@@ -148,7 +148,7 @@ _test_request "${proxy_port}"
 printf "======\n[Docker]\n"
 printf "8888:[1001,2001,3001,9998,9999]" > ./test/ports.cfg
 printf "Docker: sending HUP signal to proxy..."
-docker exec -it "${proxy_container_name}" sh -c "kill -s HUP \$(pgrep exe/proxy)"
+docker exec -it "${proxy_container_name}" sh -c "kill -s HUP \$(pgrep exe/entrypoint)"
 printf " OK\n"
 
 # Send request to previous proxy port,
