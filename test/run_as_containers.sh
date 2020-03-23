@@ -86,6 +86,26 @@ _test_request_failure()
     printf " returned status %s. OK\n" "${_status}"
 }
 
+_test_request_proxy_protocol()
+{
+    port="$1"
+    printf "Host: send PROXY PROTOCOL request to %s..." "${port}"
+
+    # Verify status code
+    if ! _status="$(printf "PROXY TCP4 192.168.0.1 192.168.0.11 56324 443\r\n" | nc "${DOCKER_IP}" "${port}")"; then
+        printf " failed to send request to %s. Data: %s\n" "${port}" "${_status}"
+        exit 1
+    fi
+
+    # Validate response
+    if ! _output="$(printf "%s" "${_status}" | grep -E "^Remote connection address\: ([0-9]{1,3}[\.]){3}[0-9]{1,3}:[0-9]{5}$" 2>/dev/null)"; then
+        printf " unexpected return after sending request to %s. Data: %s\n" "${port}" "${_status}"
+        exit 1
+    fi
+
+    printf " %s. OK\n" "${_output}"
+}
+
 # Initialize the test webserver
 printf "======\n[Docker]\n"
 printf "Docker: removing existing %s container...\n" "${webserver_container_name}"
@@ -157,6 +177,14 @@ printf "======\n[Proxy]\n"
 _test_request_failure "${proxy_port}"
 proxy_port=8888
 _test_request "${proxy_port}"
+
+# Send request to new proxy
+printf "======\n[New proxy]\n"
+proxy_port=2222
+# Cannot send regular request to 2222
+_test_request_failure "${proxy_port}"
+# Send PROXY PROTOCOL request
+_test_request_proxy_protocol "${proxy_port}"
 
 # Clean up
 docker stop "${webserver_container_name}" && docker rm "${webserver_container_name}"
