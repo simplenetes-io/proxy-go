@@ -30,6 +30,11 @@ webserver_container_name="simplenetes_proxy_test_webserver"
 webserver_port=9998
 proxy_container_name="simplenetes_proxy_test_proxy"
 proxy_port=8888
+haproxy_image="haproxy:2.1-alpine"
+haproxy_conf_path="./test/haproxy.cfg"
+haproxy_container_name="proxy_test_haproxy"
+haproxy_port_regular=8000
+haproxy_port_proxyprotocol=8001
 
 # Procedures
 _test_reachable()
@@ -133,6 +138,16 @@ docker run --name "${proxy_container_name}" --network="host" -v "$PWD:/${proxy_c
 sleep 3
 printf " OK\n"
 
+# Initialize haproxy
+# Container
+printf "======\n[Docker]\n"
+printf "Docker: removing existing %s container\n" "${haproxy_container_name}"
+docker stop "${haproxy_container_name}" && docker rm "${haproxy_container_name}"
+printf "Docker: setting up new container\n"
+docker run --name "${haproxy_container_name}" --network="host" -v "$PWD:/${haproxy_container_name}" --workdir "/${haproxy_container_name}" "${haproxy_image}" nohup sh -c "haproxy -f ${haproxy_conf_path}" &
+sleep 3
+printf " OK\n"
+
 # Check proxy is reachable,
 # then send request and validate response
 printf "======\n[Proxy]\n"
@@ -186,8 +201,15 @@ _test_request_failure "${proxy_port}"
 # Send PROXY PROTOCOL request
 _test_request_proxy_protocol "${proxy_port}"
 
+# Send request to new proxy via Haproxy
+# Regular proxy backend is expected to fail
+_test_request_failure "${haproxy_port_regular}"
+# Proxy protocol request via send-proxy
+_test_request_proxy_protocol "${haproxy_port_proxyprotocol}"
+
 # Clean up
 docker stop "${webserver_container_name}" && docker rm "${webserver_container_name}"
 docker stop "${proxy_container_name}" && docker rm "${proxy_container_name}"
+docker stop "${haproxy_container_name}" && docker rm "${haproxy_container_name}"
 
 printf "Tests completed!\n"
