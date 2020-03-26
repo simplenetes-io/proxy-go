@@ -91,7 +91,7 @@ _test_request_failure()
     printf " returned status %s. OK\n" "${_status}"
 }
 
-_test_request_proxy_protocol()
+_test_request_proxy_protocol_mapping_inactive()
 {
     port="$1"
     printf "Host: send PROXY PROTOCOL request to %s..." "${port}"
@@ -103,7 +103,7 @@ _test_request_proxy_protocol()
     fi
 
     # Validate response
-    if ! _output="$(printf "%s" "${_status}" | grep -E "^Remote connection address\: ([0-9]{1,3}[\.]){3}[0-9]{1,3}:[0-9]{5}$" 2>/dev/null)"; then
+    if ! _output="$(printf "%s" "${_status}" | grep -E "^go away$" 2>/dev/null)"; then
         printf " unexpected return after sending request to %s. Data: %s\n" "${port}" "${_status}"
         exit 1
     fi
@@ -199,13 +199,13 @@ proxy_port=2222
 # Cannot send regular request to 2222
 _test_request_failure "${proxy_port}"
 # Send PROXY PROTOCOL request
-_test_request_proxy_protocol "${proxy_port}"
+_test_request_proxy_protocol_mapping_inactive "${proxy_port}"
 
 # Send request to new proxy via Haproxy
 # Regular proxy backend is expected to fail
 _test_request_failure "${haproxy_port_regular}"
 # Proxy protocol request via send-proxy
-_test_request_proxy_protocol "${haproxy_port_proxyprotocol}"
+_test_request_proxy_protocol_mapping_inactive "${haproxy_port_proxyprotocol}"
 
 # Clean up
 docker stop "${webserver_container_name}" && docker rm "${webserver_container_name}"
