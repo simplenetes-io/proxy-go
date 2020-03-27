@@ -22,6 +22,14 @@ import (
 // Data
 type ConfigurationMap map[int][]int;
 
+type PortsConfigurationData struct {
+    hostPort int;
+    maxConnections int;
+    sendProxyFlag bool;
+}
+
+type PortsConfigurationMap map[int][]PortsConfigurationData;
+
 
 /*============================
  loadConfiguration
@@ -140,6 +148,124 @@ func loadConfiguration(cfgFilePath string) (ConfigurationMap) {
     return portsConfiguration;
 }
 
+/*============================
+ loadPortsConfiguration
+
+ This procedure takes the local proxy ports configuration file path, opens the file,
+ then extracts the file contents and store them into a key-value map.
+
+ Base configuration entry format:
+    clusterPort:hostPort:maxConnections:sendProxyFlag
+
+ Configuration example:
+    #clusterPortA:hostPort1:100:true clusterPortA:hostPort2:100:false
+    clusterPortB:hostPort10:100:false clusterPortB:hostPort11:100:false
+    [...]
+    ### EOF
+
+ Parameters:
+    cfgFilePath: local path to configuration file
+
+ Returns:
+    Loaded ports configuration map
+============================*/
+func loadPortsConfiguration(cfgFilePath string) (PortsConfigurationMap) {
+    // Open configuration file
+    var cfgFile = func(filePath string) (*os.File) {
+        file, err := os.Open(filePath);
+        if(err != nil) {
+            log.Printf("Error opening file %s for reading: %v", filePath, err);
+            os.Exit(1);
+        }
+        return file;
+    } (cfgFilePath);
+    defer cfgFile.Close();
+
+    // Extract data from configuration file
+    var portsConfiguration = func(file *os.File) (PortsConfigurationMap) {
+        var data = make(PortsConfigurationMap);
+        var scanner *bufio.Scanner = bufio.NewScanner(file);
+
+        // Try to iterate over all file contents
+        for scanner.Scan() {
+            // Data
+            //var err error = nil;
+
+            // Read line
+            var line string;
+            var lineSplit []string;
+            var lineSplitLen int;
+            line = scanner.Text();
+            log.Printf("Configuration line: %s\n", line);
+
+            // Skip commented out line
+            if(line[0] == '#') {
+                continue;
+            }
+
+            // Split by space-separated entries,
+            // then iterate over all entries
+            var lineSplitIndex int;
+            lineSplit = strings.Split(line, " ");
+            lineSplitLen = len(lineSplit);
+            var portsDataList []PortsConfigurationData;
+            portsDataList = make([]PortsConfigurationData, lineSplitLen);
+
+            var clusterPort int;
+            for lineSplitIndex=0; lineSplitIndex < lineSplitLen; lineSplitIndex++ {
+                var currentEntry string = lineSplit[lineSplitIndex];
+                var currentEntryValues []string = strings.Split(currentEntry, ":");
+                var currentEntryValuesLen int = len(currentEntryValues);
+                if(currentEntryValuesLen != 4) {
+                    log.Printf("Error while reading configuration line: %s. Expected format: clusterPort:hostPort:maxConnections:sendProxyFlag. Values: %s. Length: %d", currentEntry, currentEntryValues, currentEntryValuesLen);
+                    os.Exit(1);
+                } else {
+                    log.Printf("Parsing configuration entry: %s\n", currentEntry);
+                    var err error;
+                    var portsData PortsConfigurationData;
+                    portsData.hostPort, err = strconv.Atoi(currentEntryValues[1]);
+                    if(err != nil) {
+                        log.Printf("Error converting hostPort: %s. Message: %v", currentEntryValues[1], err);
+                        os.Exit(1);
+                    }
+                    portsData.maxConnections, err = strconv.Atoi(currentEntryValues[2]);
+                    if(err != nil) {
+                        log.Printf("Error converting maxConnections: %s. Message: %v", currentEntryValues[2], err);
+                        os.Exit(1);
+                    }
+                    portsData.sendProxyFlag, err = strconv.ParseBool(currentEntryValues[3]);
+                    if(err != nil) {
+                        log.Printf("Error converting sendProxyFlag: %s. Message: %v", currentEntryValues[3], err);
+                        os.Exit(1);
+                    }
+
+                    clusterPort, err = strconv.Atoi(currentEntryValues[0]);
+                    if(err != nil) {
+                        log.Printf("Error converting clusterPort: %s. Message: %v", currentEntryValues[1], err);
+                        os.Exit(1);
+                    }
+                    portsDataList[lineSplitIndex] = portsData;
+                }
+            }
+
+            data[clusterPort] = portsDataList;
+        }
+
+        // In case of error during Scan(), expect to catch error here
+        var err error = nil;
+        err = scanner.Err();
+        if(err != nil) {
+            log.Printf("Error reading from file: %v", err);
+            os.Exit(1);
+        }
+
+        // Otherwise, assume data is in good condition
+        return data;
+    } (cfgFile);
+
+    // Return loaded configuration data
+    return portsConfiguration;
+}
 func loadListener(networkMode string, clusterAddress string, previousPortsConfiguration ConfigurationMap, newPortsConfiguration ConfigurationMap, currentListeners *map[int]net.Listener) () {
     var port int;
     // close all open ports which are no longer part of configuration
@@ -288,9 +414,10 @@ func main() {
     }
 
     // Program settings
-//TODO: FIXME: enable customizable configuration path
+    //TODO: FIXME: enable customizable configuration path
     //const configurationFile string = "cfg/ports.cfg";
     const configurationFile string = "test/ports.cfg";
+    const portsConfigurationFile string = "test/ports.conf";
 
     // Network settings
     const networkMode string = "tcp";
@@ -305,6 +432,9 @@ func main() {
     var portsConfiguration ConfigurationMap = loadConfiguration(configurationFile);
     var listeners map[int]net.Listener;
     listeners = make(map[int]net.Listener);
+
+    var newPortsConfiguration PortsConfigurationMap = loadPortsConfiguration(portsConfigurationFile);
+    log.Printf("Ports configuration: %v\n", newPortsConfiguration);
 
     // Start listener
     // Input : announce and listen to incoming connections
