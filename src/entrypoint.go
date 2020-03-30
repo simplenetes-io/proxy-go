@@ -16,6 +16,7 @@ import (
     "strconv"
     "strings"
     "syscall"
+    "time"
 )
 
 
@@ -622,6 +623,59 @@ func main() {
         }
     } (listener);
 
+    // Install watcher for ports configuration file changes
+    var watchForFileChanges = func(filePath string, channel chan bool) {
+        var fileStatBase os.FileInfo;
+        var err error;
+
+        // Mark initial file state
+        fileStatBase, err = os.Stat(filePath);
+        if(err != nil) {
+            log.Printf("Error trying to stat file %s: %v", fileStatBase, err);
+            channel <- false;
+            return;
+        }
+
+        // Watch for changes by comparing the modification time and file size
+        for {
+            var fileStatNow os.FileInfo;
+            fileStatNow, err = os.Stat(filePath);
+            if(err != nil) {
+                log.Printf("Error trying to stat file %s: %v", fileStatNow, err);
+                channel <- false;
+                return;
+            }
+
+            if(fileStatNow.ModTime() != fileStatBase.ModTime() || fileStatNow.Size() != fileStatBase.Size()) {
+                break;
+            }
+
+            time.Sleep(2 * time.Second);
+        }
+
+        // Return
+        if(err != nil) {
+            log.Printf("Error while watching for file %s: %v", filePath, err);
+            channel <- false;
+        } else {
+            channel <- true;
+        }
+    }
+    var watchChannel chan bool;
+    go func() {
+        var fileHasChanged bool;
+        for {
+            watchChannel = make(chan bool);
+            go watchForFileChanges(portsConfigurationFile, watchChannel);
+            fileHasChanged = <-watchChannel;
+            if(fileHasChanged) {
+                log.Printf("Ports configuration file has changed: %s. Reloading...\n", portsConfigurationFile);
+                newPortsConfiguration = loadPortsConfiguration(portsConfigurationFile);
+                log.Printf("Ports configuration: %v\n", newPortsConfiguration);
+            }
+        }
+    } ();
+
     // Install SIGHUP for handling reload
     var signalChannel chan os.Signal = make(chan os.Signal, 1);
     go func() {
@@ -644,5 +698,6 @@ func main() {
     go handlePorts(networkMode, hostAddress, portsConfiguration, &listeners);
 
     // TODO: consider readding sync.WaitGroup -> Wait instead of infinite loop
-    for {}
+    //for {}
+    <-watchChannel;
 }
