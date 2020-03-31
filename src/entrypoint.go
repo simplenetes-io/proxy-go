@@ -423,7 +423,7 @@ func main() {
     // Network settings
     const networkMode string = "tcp";
     const listenerHost string = "";
-    const listenerPort int = 2222;
+    const listenerPort int = 32767;
 
     // Cluster settings (in)
     // Host settings (out)
@@ -478,7 +478,7 @@ func main() {
                 }();
 
                 // Check presence of proxy protocol
-                var isProxyProtocol = func() (bool) {
+                var clientIp, proxyIp, clientPort, proxyPort = func() (string, string, int, int) {
                     var err error;
                     var connectionReader *bufio.Reader;
                     connectionReader = bufio.NewReader(connection);
@@ -495,7 +495,7 @@ func main() {
                     if(err != nil || connectionReaderBufferCount != proxyProtocolHeaderStringLen ||
                         !bytes.Equal(connectionReaderBuffer, []byte(proxyProtocolHeaderString))) {
                         log.Printf("Error parsing proxy protocol header prefix: %s. Error: %v", connectionReaderBuffer, err);
-                        return false;
+                        return "", "", 0, 0;
                     }
 
                     // Check case of unknown proxy protocol
@@ -505,7 +505,7 @@ func main() {
                     // Check unknwon buffer is valid and data matches expected content
                     if(err != nil || bytes.Equal(connectionReaderBuffer, []byte(proxyProtocolUnknownString))) {
                         log.Printf("Error parsing proxy protocol unknown: %v", err);
-                        return false;
+                        return "", "", 0, 0;
                     }
 
                     // Check TCP4 proxy protocol case
@@ -519,7 +519,7 @@ func main() {
                     if(err != nil || connectionReaderBufferCount != proxyProtocolTCP4StringLen ||
                         !bytes.Equal(connectionReaderBuffer, []byte(proxyProtocolTCP4String))) {
                         log.Printf("Error parsing proxy protocol inet protocol: %s. Error: ", connectionReaderBuffer, err);
-                        return false;
+                        return "", "", 0, 0;
                     }
 
                     // Read client IP address
@@ -527,7 +527,7 @@ func main() {
                     proxyProtocolClientIpString, err = connectionReader.ReadString(' ');
                     if(err != nil) {
                         log.Printf("Error parsing proxy protocol client IP: %v", err);
-                        return false;
+                        return "", "", 0, 0;
                     }
                     // Adjust string
                     var proxyProtocolClientIpStringLen int;
@@ -538,7 +538,7 @@ func main() {
                     proxyProtocolClientIp = net.ParseIP(proxyProtocolClientIpString);
                     if(proxyProtocolClientIp == nil) {
                         log.Printf("Error parsing client IP: %s", proxyProtocolClientIpString);
-                        return false;
+                        return "", "", 0, 0;
                     }
 
                     // Read proxy IP address
@@ -546,7 +546,7 @@ func main() {
                     proxyProtocolProxyIpString, err = connectionReader.ReadString(' ');
                     if(err != nil) {
                         log.Printf("Error parsing proxy protocol proxy IP: %v", err);
-                        return false;
+                        return "", "", 0, 0;
                     }
                     // Adjust string
                     var proxyProtocolProxyIpStringLen int;
@@ -557,7 +557,7 @@ func main() {
                     proxyProtocolProxyIp = net.ParseIP(proxyProtocolProxyIpString);
                     if(proxyProtocolProxyIp == nil) {
                         log.Printf("Error parsing proxy IP: %s", proxyProtocolClientIpString);
-                        return false;
+                        return "", "", 0, 0;
                     }
 
                     // Read client port number
@@ -565,7 +565,7 @@ func main() {
                     proxyProtocolClientPortString, err = connectionReader.ReadString(' ');
                     if(err != nil) {
                         log.Printf("Error parsing proxy protocol client port: %v", err);
-                        return false;
+                        return "", "", 0, 0;
                     }
                     // Adjust number
                     var proxyProtocolClientPortStringLen int;
@@ -576,7 +576,7 @@ func main() {
                     proxyProtocolClientPort, err = strconv.Atoi(proxyProtocolClientPortString);
                     if(err != nil) {
                         log.Printf("Error parsing proxy protocol client port: %v", err);
-                        return false;
+                        return "", "", 0, 0;
                     }
 
                     // Read proxy port number
@@ -584,7 +584,7 @@ func main() {
                     proxyProtocolProxyPortString, err = connectionReader.ReadString('\r');
                     if(err != nil) {
                         log.Printf("Error parsing proxy protocol proxy port: %v", err);
-                        return false;
+                        return "", "", 0, 0;
                     }
                     // Adjust number
                     var proxyProtocolProxyPortStringLen int;
@@ -595,7 +595,7 @@ func main() {
                     proxyProtocolProxyPort, err = strconv.Atoi(proxyProtocolProxyPortString);
                     if(err != nil) {
                         log.Printf("Error parsing proxy protocol proxy port: %v", err);
-                        return false;
+                        return "", "", 0, 0;
                     }
 
                     // Read trailing characters
@@ -603,21 +603,25 @@ func main() {
                     proxyProtocolTrailingByte, err = connectionReader.ReadByte();
                     if(err != nil || proxyProtocolTrailingByte != '\n') {
                         log.Printf("Error parsing proxy protocol trailing byte: %v", err);
-                        return false;
+                        return "", "", 0, 0;
                     }
 
-                    // Debugging
-                    log.Printf("Finished parsing proxy protocol line. inet: tcp | Remote clientip: %s, clientport %d | Proxy proxyip: %s, proxyport: %d\n", proxyProtocolClientIp, proxyProtocolClientPort, proxyProtocolProxyIp, proxyProtocolProxyPort);
-                    return true;
+                    return proxyProtocolClientIpString, proxyProtocolProxyIpString, proxyProtocolClientPort, proxyProtocolProxyPort;
                 } ();
 
                 // Reply port mapping status
                 const responseMappingActive string = "go ahead\n"
                 const responseMappingInactive string = "go away\n"
-                if(isProxyProtocol == false) {
+                log.Printf("Reading back proxy protocol line. inet: tcp | Remote clientip: %s, clientport %d | Proxy proxyip: %s, proxyport: %d\n", clientIp, clientPort, proxyIp, proxyPort);
+                if(proxyPort == 0) {
+                    log.Printf("Error reading back from proxy protocol line. Proxy port: %d", proxyPort);
                     return;
                 } else {
-                    fmt.Fprintf(connection, responseMappingInactive);
+                    if(newPortsConfiguration[proxyPort] != nil) {
+                        fmt.Fprintf(connection, responseMappingActive);
+                    } else {
+                        fmt.Fprintf(connection, responseMappingInactive);
+                    }
                 }
             } (connection);
         }

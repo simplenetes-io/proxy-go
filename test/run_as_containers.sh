@@ -27,14 +27,15 @@ DOCKER_IP=${DOCKER_IP:-127.0.0.1}
 # Data
 golang_image="golang:1.14-alpine"
 webserver_container_name="simplenetes_proxy_test_webserver"
-webserver_port=9998
+webserver_port=30998
 proxy_container_name="simplenetes_proxy_test_proxy"
 proxy_port=8888
 haproxy_image="haproxy:2.1-alpine"
 haproxy_conf_path="./test/haproxy.cfg"
 haproxy_container_name="proxy_test_haproxy"
 haproxy_port_regular=8000
-haproxy_port_proxyprotocol=8001
+haproxy_port_proxyprotocol_unmapped=8001
+haproxy_port_proxyprotocol_mapped=29999
 
 # Procedures
 _test_reachable()
@@ -69,7 +70,7 @@ _test_request()
     fi
 
     # Validate response
-    if ! _output="$(printf "%s" "${_status}" | grep "^webserver [0-9]* (9998)$" 2>/dev/null)"; then
+    if ! _output="$(printf "%s" "${_status}" | grep "^webserver [0-9]* (30998)$" 2>/dev/null)"; then
         printf " unexpected return after sending request to %s. Data: %s\n" "${port}" "${_status}"
         exit 1
     fi
@@ -91,7 +92,10 @@ _test_request_failure()
     printf " returned status %s. OK\n" "${_status}"
 }
 
-_test_request_proxy_protocol_mapping_inactive()
+# TODO: FIXME:
+#_test_request_proxy_protocol_mapping_inactive()
+
+_test_request_proxy_protocol_mapping_unmapped()
 {
     port="$1"
     printf "Host: send PROXY PROTOCOL request to %s..." "${port}"
@@ -111,6 +115,25 @@ _test_request_proxy_protocol_mapping_inactive()
     printf " %s. OK\n" "${_output}"
 }
 
+_test_request_proxy_protocol_mapping_mapped()
+{
+    port="$1"
+    printf "Host: send PROXY PROTOCOL request to %s..." "${port}"
+
+    # Verify status code
+    if ! _status="$(printf "PROXY TCP4 192.168.0.1 192.168.0.11 56324 443\r\n" | nc "${DOCKER_IP}" "${port}")"; then
+        printf " failed to send request to %s. Data: %s\n" "${port}" "${_status}"
+        exit 1
+    fi
+
+    # Validate response
+    if ! _output="$(printf "%s" "${_status}" | grep -E "^go ahead$" 2>/dev/null)"; then
+        printf " unexpected return after sending request to %s. Data: %s\n" "${port}" "${_status}"
+        exit 1
+    fi
+
+    printf " %s. OK\n" "${_output}"
+}
 # Initialize the test webserver
 printf "======\n[Docker]\n"
 printf "Docker: removing existing %s container...\n" "${webserver_container_name}"
@@ -129,7 +152,7 @@ _test_request "${webserver_port}"
 # Initialize the proxy server
 # Configuration
 printf "======\n[Docker]\n"
-printf "8888:[1001,2001,3001,9998,9999]" > ./test/ports.cfg
+printf "8888:[1001,2001,3001,30998,9999]" > ./test/ports.cfg
 # Container
 printf "Docker: removing existing %s container...\n" "${proxy_container_name}"
 docker stop "${proxy_container_name}" && docker rm "${proxy_container_name}"
@@ -154,7 +177,7 @@ printf "======\n[Proxy]\n"
 _test_reachable "${proxy_port}"
 _test_request "${proxy_port}"
 
-# Send SIGHUP to proxym
+# Send SIGHUP to proxy
 printf "======\n[Docker]\n"
 printf "Docker: sending HUP signal to proxy..."
 docker exec -it "${proxy_container_name}" sh -c "kill -s HUP \$(pgrep exe/entrypoint)"
@@ -166,7 +189,7 @@ _test_request "${proxy_port}"
 
 # Push configuration changes
 printf "======\n[Docker]\n"
-printf "7777:[1001,2001,3001,9998,9999]" > ./test/ports.cfg
+printf "7777:[1001,2001,3001,30998,9999]" > ./test/ports.cfg
 # Send SIGHUP to proxy
 printf "Docker: sending HUP signal to proxy..."
 docker exec -it "${proxy_container_name}" sh -c "kill -s HUP \$(pgrep exe/entrypoint)"
@@ -181,7 +204,7 @@ _test_request "${proxy_port}"
 
 # Restore proxy port to initial state
 printf "======\n[Docker]\n"
-printf "8888:[1001,2001,3001,9998,9999]" > ./test/ports.cfg
+printf "8888:[1001,2001,3001,30998,9999]" > ./test/ports.cfg
 printf "Docker: sending HUP signal to proxy..."
 docker exec -it "${proxy_container_name}" sh -c "kill -s HUP \$(pgrep exe/entrypoint)"
 printf " OK\n"
@@ -195,17 +218,21 @@ _test_request "${proxy_port}"
 
 # Send request to new proxy
 printf "======\n[New proxy]\n"
-proxy_port=2222
-# Cannot send regular request to 2222
+proxy_port=32767
+# Cannot send regular request to 32767
 _test_request_failure "${proxy_port}"
 # Send PROXY PROTOCOL request
-_test_request_proxy_protocol_mapping_inactive "${proxy_port}"
+_test_request_proxy_protocol_mapping_unmapped "${proxy_port}"
 
 # Send request to new proxy via Haproxy
 # Regular proxy backend is expected to fail
 _test_request_failure "${haproxy_port_regular}"
 # Proxy protocol request via send-proxy
-_test_request_proxy_protocol_mapping_inactive "${haproxy_port_proxyprotocol}"
+# Unmapped
+_test_request_proxy_protocol_mapping_unmapped "${haproxy_port_proxyprotocol_unmapped}"
+# TODO: FIXME: mapped but inactive ?
+# Mapped
+_test_request_proxy_protocol_mapping_mapped "${haproxy_port_proxyprotocol_mapped}"
 
 # Clean up
 docker stop "${webserver_container_name}" && docker rm "${webserver_container_name}"
