@@ -468,15 +468,6 @@ func main() {
             go func(conn net.Conn) {
                 log.Printf("Handling remote connection: %s\n", connection.RemoteAddr());
 
-                // Mark connection to be closed on exit
-                defer func() {
-                    log.Printf("Closing remote connection: %s\n", connection.RemoteAddr());
-                    err = connection.Close();
-                    if(err != nil) {
-                        log.Printf("Error closing connection: %s. Error: %v", connection.RemoteAddr(), err);
-                    }
-                }();
-
                 // Check presence of proxy protocol
                 var clientIp, proxyIp, clientPort, proxyPort = func() (string, string, int, int) {
                     var err error;
@@ -615,12 +606,80 @@ func main() {
                 log.Printf("Reading back proxy protocol line. inet: tcp | Remote clientip: %s, clientport %d | Proxy proxyip: %s, proxyport: %d\n", clientIp, clientPort, proxyIp, proxyPort);
                 if(proxyPort == 0) {
                     log.Printf("Error reading back from proxy protocol line. Proxy port: %d", proxyPort);
+                    err = connection.Close();
+                    if(err != nil) {
+                        log.Printf("Error closing connection: %s. Error: %v", connection.RemoteAddr(), err);
+                    }
                     return;
                 } else {
                     if(newPortsConfiguration[proxyPort] != nil) {
                         fmt.Fprintf(connection, responseMappingActive);
+
+                        var hostPorts []PortsConfigurationData;
+                        hostPorts = newPortsConfiguration[proxyPort];
+
+                        // Pass the connection to handler
+                        if(connection != nil) {
+                            go func(mode string, address string, ports []PortsConfigurationData, conn net.Conn) {
+                                var hostConnection net.Conn;
+                                var err error;
+
+                                // Iterate over all host ports trying to connect to host
+                                var hostPortsIndex int;
+                                var hostPortsLen = len(ports);
+                                log.Printf("Current number of configured host ports: %d", hostPortsLen);
+                                for hostPortsIndex=0; hostPortsIndex < hostPortsLen; hostPortsIndex++ {
+                                    var host = address + ":" + strconv.Itoa(ports[hostPortsIndex].hostPort);
+                                    hostConnection, err = net.Dial(mode, host);
+                                    if(err == nil) {
+                                        log.Printf("Connected to %s", host);
+
+                                        // Input: Send data from received connection to host
+                                        go func() {
+                                            var err error;
+                                            _, err = io.Copy(conn, hostConnection);
+                                            if(err != nil) {
+                                                log.Printf("Error copying data from cluster to host: %v", err);
+                                                hostConnection.Close();
+                                                return;
+                                            }
+                                        }();
+
+                                        // Output: send data from host back to the original connection
+                                        go func() {
+                                            var err error;
+                                            log.Printf("Copying to hostConnection %s and conn %s", hostConnection.RemoteAddr(), conn.RemoteAddr());
+                                            _, err = io.Copy(hostConnection, conn);
+                                            if(err != nil) {
+                                                log.Printf("Error copying data from host to cluster: %v", err);
+                                                hostConnection.Close();
+                                                return;
+                                            }
+                                        }();
+
+                                        // End host ports loop
+                                        break;
+                                    } else {
+                                        log.Printf("Error connecting to %s in mode %s. Message: %v", host, mode, err);
+                                        // TODO: FIXME: send error reply when unable to find any match
+                                    }
+                                }
+                            } (networkMode, hostAddress, hostPorts, connection);
+                        } else {
+                            log.Printf("Ports routine for %s, over and out!\n", listener.Addr());
+                            err = connection.Close();
+                            if(err != nil) {
+                                log.Printf("Error closing connection: %s. Error: %v", connection.RemoteAddr(), err);
+                            }
+                            return;
+                        }
                     } else {
                         fmt.Fprintf(connection, responseMappingInactive);
+                        err = connection.Close();
+                        if(err != nil) {
+                            log.Printf("Error closing connection: %s. Error: %v", connection.RemoteAddr(), err);
+                        }
+                        return;
                     }
                 }
             } (connection);
