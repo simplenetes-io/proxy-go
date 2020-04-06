@@ -120,11 +120,14 @@ _test_request_proxy_protocol_mapping_mapped()
     port="$1"
     printf "Host: send PROXY PROTOCOL request to %s..." "${port}"
 
-    # Verify status code
-    if ! _status="$(printf "PROXY TCP4 192.168.0.1 192.168.0.11 56324 443\r\n" | nc "${DOCKER_IP}" "${port}")"; then
-        printf " failed to send request to %s. Data: %s\n" "${port}" "${_status}"
-        exit 1
-    fi
+    # Run request in background
+    printf "starting in background...\n"
+    printf "PROXY TCP4 192.168.0.1 192.168.0.11 56324 ${haproxy_port_proxyprotocol_mapped}\r\n" | nc "${DOCKER_IP}" "${port}" > "./tmp_output.txt" &
+    _pid="$!"
+
+    sleep 1
+    _status=$(cat "./tmp_output.txt")
+    kill "${_pid}"
 
     # Validate response
     if ! _output="$(printf "%s" "${_status}" | grep -E "^go ahead$" 2>/dev/null)"; then
@@ -134,6 +137,7 @@ _test_request_proxy_protocol_mapping_mapped()
 
     printf " %s. OK\n" "${_output}"
 }
+
 # Initialize the test webserver
 printf "======\n[Docker]\n"
 printf "Docker: removing existing %s container...\n" "${webserver_container_name}"
@@ -233,6 +237,10 @@ _test_request_proxy_protocol_mapping_unmapped "${haproxy_port_proxyprotocol_unma
 # TODO: FIXME: mapped but inactive ?
 # Mapped
 _test_request_proxy_protocol_mapping_mapped "${haproxy_port_proxyprotocol_mapped}"
+
+
+# TODO: FIXME: find a way to automate call and responses between client and hosts (see doc/MANUAL_VERIFICATION.md)
+
 
 # Clean up
 docker stop "${webserver_container_name}" && docker rm "${webserver_container_name}"
