@@ -373,6 +373,7 @@ func handlePorts(networkMode string, hostAddress string, portsConfiguration Conf
                                         if(err != nil) {
                                             log.Printf("Error copying data from cluster to host: %v", err);
                                             hostConnection.Close();
+                                            //conn.Close(); ? Leak ?
                                             return;
                                         }
                                     }();
@@ -384,6 +385,7 @@ func handlePorts(networkMode string, hostAddress string, portsConfiguration Conf
                                         if(err != nil) {
                                             log.Printf("Error copying data from host to cluster: %v", err);
                                             hostConnection.Close();
+                                            //conn.Close(); ? Leak ?
                                             return;
                                         }
                                     }();
@@ -613,7 +615,6 @@ func main() {
                     return;
                 } else {
                     if(newPortsConfiguration[proxyPort] != nil) {
-                        fmt.Fprintf(connection, responseMappingActive);
 
                         var hostPorts []PortsConfigurationData;
                         hostPorts = newPortsConfiguration[proxyPort];
@@ -627,11 +628,13 @@ func main() {
                                 // Iterate over all host ports trying to connect to host
                                 var hostPortsIndex int;
                                 var hostPortsLen = len(ports);
+                                var attempts int = 0;
                                 log.Printf("Current number of configured host ports: %d", hostPortsLen);
                                 for hostPortsIndex=0; hostPortsIndex < hostPortsLen; hostPortsIndex++ {
                                     var host = address + ":" + strconv.Itoa(ports[hostPortsIndex].hostPort);
                                     hostConnection, err = net.Dial(mode, host);
                                     if(err == nil) {
+                                        fmt.Fprintf(connection, responseMappingActive);
                                         log.Printf("Connected to %s", host);
 
                                         // Input: Send data from received connection to host
@@ -660,8 +663,16 @@ func main() {
                                         // End host ports loop
                                         break;
                                     } else {
+                                        attempts++;
                                         log.Printf("Error connecting to %s in mode %s. Message: %v", host, mode, err);
-                                        // TODO: FIXME: send error reply when unable to find any match
+                                        if(attempts >= hostPortsLen) {
+                                            fmt.Fprintf(connection, responseMappingInactive);
+                                            err = connection.Close();
+                                            if(err != nil) {
+                                                log.Printf("Error closing connection: %s. Error: %v", connection.RemoteAddr(), err);
+                                            }
+                                            return;
+                                        }
                                     }
                                 }
                             } (networkMode, hostAddress, hostPorts, connection);
@@ -735,6 +746,7 @@ func main() {
                 log.Printf("Ports configuration file has changed: %s. Reloading...\n", portsConfigurationFile);
                 newPortsConfiguration = loadPortsConfiguration(portsConfigurationFile);
                 log.Printf("Ports configuration: %v\n", newPortsConfiguration);
+                // TODO: FIXME: newPortsConfiguration should drop all connections that were removed in the reload process (diff)
             }
         }
     } ();
