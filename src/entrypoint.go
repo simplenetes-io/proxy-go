@@ -451,6 +451,10 @@ func main() {
         return listen;
     } (networkMode, listenerHost + ":" + strconv.Itoa(listenerPort));
 
+    // Set up max connections data
+    var currentHostPortsMaxConnections map[int]int;
+    currentHostPortsMaxConnections = make(map[int]int);
+
     // Handle listener connections
     go func(listener net.Listener) {
         // Transform: forward all connections to handler
@@ -631,14 +635,44 @@ func main() {
                                 var attempts int = 0;
                                 log.Printf("Current number of configured host ports: %d", hostPortsLen);
                                 for hostPortsIndex=0; hostPortsIndex < hostPortsLen; hostPortsIndex++ {
-                                    var host = address + ":" + strconv.Itoa(ports[hostPortsIndex].hostPort);
+                                    var currentHostPort = ports[hostPortsIndex].hostPort;
+                                    var host = address + ":" + strconv.Itoa(currentHostPort);
+
+                                    // Limit max connections
+                                    var currentHostMaxConnections = ports[hostPortsIndex].maxConnections;
+                                    if(currentHostPortsMaxConnections[currentHostPort] >= currentHostMaxConnections) {
+                                        log.Printf("Error connecting to %s in mode %s. Reached maximum number of active connections (%d)", host, mode, currentHostMaxConnections);
+                                        if(hostPortsIndex == (hostPortsLen-1)) {
+                                            fmt.Fprintf(connection, responseMappingInactive);
+                                            err = connection.Close();
+                                            if(err != nil) {
+                                                log.Printf("Error closing connection: %s. Error: %v", connection.RemoteAddr(), err);
+                                            }
+                                            return;
+                                        } else {
+                                            attempts++;
+                                            continue;
+                                        }
+                                    }
+
                                     hostConnection, err = net.Dial(mode, host);
                                     if(err == nil) {
                                         fmt.Fprintf(connection, responseMappingActive);
                                         log.Printf("Connected to %s", host);
+                                        currentHostPortsMaxConnections[currentHostPort]++; // TODO: FIXME: CMPXCHG
+                                        log.Printf("Current connections on port %d: %d (%d)", currentHostPort, currentHostPortsMaxConnections[currentHostPort], currentHostMaxConnections);
+                                        var isConnected = true; // TODO: FIXME: atomic
 
                                         // Input: Send data from received connection to host
                                         go func() {
+                                            defer func() {
+                                                log.Printf("Closing input host connection...");
+                                                if(isConnected) { // TODO: FIXME: atomic
+                                                    currentHostPortsMaxConnections[currentHostPort]--;
+                                                    isConnected = false;
+                                                }
+                                            } ();
+
                                             var err error;
                                             _, err = io.Copy(conn, hostConnection);
                                             if(err != nil) {
@@ -650,6 +684,14 @@ func main() {
 
                                         // Output: send data from host back to the original connection
                                         go func() {
+                                            defer func() {
+                                                log.Printf("Closing output host connection...");
+                                                if(isConnected) { // TODO: FIXME: atomic
+                                                    currentHostPortsMaxConnections[currentHostPort]--;
+                                                    isConnected = false;
+                                                }
+                                            } ();
+
                                             var err error;
                                             log.Printf("Copying to hostConnection %s and conn %s", hostConnection.RemoteAddr(), conn.RemoteAddr());
                                             _, err = io.Copy(hostConnection, conn);
