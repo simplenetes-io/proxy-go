@@ -182,6 +182,40 @@ func loadPortsConfiguration(cfgFilePath string) (PortsConfigurationMap) {
     } (cfgFilePath);
     defer cfgFile.Close();
 
+    // EOF line: check the file is ready for reading
+    var err error = nil;
+    const eofLine string = "### EOF\n"
+    var eofLineLength int = len(eofLine);
+    var cfgFileStat os.FileInfo;
+    var cfgFileStatSize int64;
+    var cfgFileLastLine []byte;
+    var cfgFileLastLineStr string;
+    var cfgFileLastLineOffset int64;
+    var cfgFileLastLineBytesRead int;
+    cfgFileStat, err = cfgFile.Stat();
+    if(err != nil) {
+        log.Printf("Error stating file %s: %v", cfgFilePath, err);
+        return nil;
+    }
+    cfgFileStatSize = cfgFileStat.Size();
+    cfgFileLastLine =  make([]byte, eofLineLength)
+    cfgFileLastLineOffset = cfgFileStatSize - int64(eofLineLength);
+    cfgFileLastLineBytesRead, err = cfgFile.ReadAt(cfgFileLastLine, cfgFileLastLineOffset);
+    if(cfgFileLastLineBytesRead != eofLineLength) {
+        log.Printf("Error reading file %s last line. Expected bytes read (%d) to be the same length as EOF line: %d", cfgFilePath, cfgFileLastLineBytesRead, eofLineLength);
+        return nil;
+    }
+    if(err != nil) {
+        log.Printf("Error reading file %s last line: %v", cfgFilePath, err);
+        return nil;
+    }
+    cfgFileLastLine = cfgFileLastLine[:cfgFileLastLineBytesRead]
+    cfgFileLastLineStr = string(cfgFileLastLine);
+    if(cfgFileLastLineStr != eofLine) {
+        log.Printf("Ports configuration file is still being written to. Skipping ports configuration reload...");
+        return nil;
+    }
+
     // Extract data from configuration file
     var portsConfiguration = func(file *os.File) (PortsConfigurationMap) {
         var data = make(PortsConfigurationMap);
@@ -189,9 +223,6 @@ func loadPortsConfiguration(cfgFilePath string) (PortsConfigurationMap) {
 
         // Try to iterate over all file contents
         for scanner.Scan() {
-            // Data
-            //var err error = nil;
-
             // Read line
             var line string;
             var lineSplit []string;
@@ -437,6 +468,11 @@ func main() {
     listeners = make(map[int]net.Listener);
 
     var newPortsConfiguration PortsConfigurationMap = loadPortsConfiguration(portsConfigurationFile);
+    if(newPortsConfiguration == nil) {
+        log.Printf("Error reading ports configuration file. Expected initial configuration to be valid");
+        os.Exit(1);
+    }
+
     log.Printf("Ports configuration: %v\n", newPortsConfiguration);
 
     // Start listener
@@ -786,9 +822,12 @@ func main() {
             fileHasChanged = <-watchChannel;
             if(fileHasChanged) {
                 log.Printf("Ports configuration file has changed: %s. Reloading...\n", portsConfigurationFile);
-                newPortsConfiguration = loadPortsConfiguration(portsConfigurationFile);
-                log.Printf("Ports configuration: %v\n", newPortsConfiguration);
-                // TODO: FIXME: newPortsConfiguration should drop all connections that were removed in the reload process (diff)
+                var configuration = loadPortsConfiguration(portsConfigurationFile);
+                if(configuration != nil) {
+                    log.Printf("Ports configuration: %v\n", newPortsConfiguration);
+                    // TODO: FIXME: newPortsConfiguration should drop all connections that were removed in the reload process (diff)
+                    newPortsConfiguration = configuration;
+                }
             }
         }
     } ();
