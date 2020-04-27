@@ -117,8 +117,9 @@ clusterPortB:hostPort10:100:false clusterPortB:hostPort11:100:false
 5. If 3 is true, make connection to one `hostPort`.
 
 6. `clusterPorts` when connected to `hostPorts`, could expect _proxy-protocol_, as stated in the proxy configuration.
-When a backend server in _haproxy_ is marked as _accept-proxy_, _haproxy_ send that initial oneliner containing _Client IP_, original port. If in the _proxy.conf_ that specific `hostPort` is marked as `sendProxy=true` (accept-proxy), then send a _proxy-protocol_ one-liner directly on the new socket so that the pod can see the _"ClientIP"_.
+When a backend nginx server in _haproxy_ is marked as _accept-proxy_ (nginx option), _haproxy_ send that initial oneliner containing _Client IP_, original port. If in the _proxy.conf_ that specific `hostPort` is marked as `sendProxy=true`, then the proxy sends a _proxy-protocol_ one-liner directly on the new socket so that the pod (running nginx with the accept-proxy option) can see the _"ClientIP"_.
 *Important*: When `sendProxy=true`, that `hostPort` always sends the initial oneliner. Example: `PROXY TCP4 192.168.0.1 192.168.0.11 56324 443\r\n`. Link: https://www.haproxy.org/download/1.8/doc/proxy-protocol.txt
-
+*Important*: Accept-proxy is how one can configure nginx to expect that one-liner
+*Important*: nginx will then read the one liner and adjust ClientIP variable
 
 7. Else, just start proxying traffic, detect shutdowns, etc.

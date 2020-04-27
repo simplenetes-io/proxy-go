@@ -695,6 +695,14 @@ func main() {
                                     if(err == nil) {
                                         fmt.Fprintf(connection, responseMappingActive);
                                         log.Printf("Connected to %s", host);
+
+                                        var currentSendProxyFlag = ports[hostPortsIndex].sendProxyFlag;
+                                        if(currentSendProxyFlag) {
+                                            var proxyLine = "PROXY TCP4 " + clientIp + " " + proxyIp + " " + strconv.Itoa(clientPort) + " " + strconv.Itoa(proxyPort) + "\r\n";
+                                            fmt.Fprintf(hostConnection, proxyLine);
+                                            log.Printf("sendProxy is set");
+                                        }
+
                                         currentHostPortsMaxConnections[currentHostPort]++; // TODO: FIXME: CMPXCHG
                                         log.Printf("Current connections on port %d: %d (%d)", currentHostPort, currentHostPortsMaxConnections[currentHostPort], currentHostMaxConnections);
                                         var isConnected = true; // TODO: FIXME: atomic

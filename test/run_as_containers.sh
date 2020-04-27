@@ -20,6 +20,10 @@ if ! command -v docker >/dev/null; then
     printf "Unable to find external program: docker\n" >&2
     exit 1
 fi
+if ! command -v netcat >/dev/null; then
+    printf "Unable to find external program: netcat\n" >&2
+    exit 1
+fi
 
 # Environment variables
 DOCKER_IP=${DOCKER_IP:-127.0.0.1}
@@ -30,6 +34,8 @@ webserver_container_name="simplenetes_proxy_test_webserver"
 webserver_port=30998
 proxy_container_name="simplenetes_proxy_test_proxy"
 proxy_port=8888
+nginx_image="nginx:alpine"
+nginx_container_name="proxy_test_nginx"
 haproxy_image="haproxy:2.1-alpine"
 haproxy_conf_path="./test/haproxy.cfg"
 haproxy_container_name="proxy_test_haproxy"
@@ -165,6 +171,16 @@ docker run --name "${proxy_container_name}" --network="host" -v "$PWD:/${proxy_c
 sleep 3
 printf " OK\n"
 
+# Initialize nginx server
+# Container
+printf "======\n[Docker]\n"
+printf "Docker: removing existing %s container\n" "${nginx_container_name}"
+docker stop "${nginx_container_name}" && docker rm "${nginx_container_name}"
+printf "Docker: setting up new container\n"
+docker run -d --name "${nginx_container_name}" --network="host" -v $PWD/test/nginx.conf:/etc/nginx/nginx.conf:ro "${nginx_image}"
+sleep 3
+printf " OK\n"
+
 # Initialize haproxy
 # Container
 printf "======\n[Docker]\n"
@@ -238,6 +254,43 @@ _test_request_proxy_protocol_mapping_unmapped "${haproxy_port_proxyprotocol_unma
 # Mapped
 _test_request_proxy_protocol_mapping_mapped "${haproxy_port_proxyprotocol_mapped}"
 
+# sendProxy flag
+printf "======\n[New proxy - sendProxy]\n"
+_proxyrequest_file="./proxyrequest"
+_proxyoutput_file="./proxyoutput"
+_netcatpid_file="./netcatpid"
+rm "${_proxyrequest_file}"
+mkfifo "${_proxyrequest_file}"
+tail -f "${_proxyrequest_file}" | netcat ${DOCKER_IP} ${proxy_port} > "${_proxyoutput_file}" &
+echo $! > "${_netcatpid_file}"
+printf "PROXY TCP4 1.2.3.4 5.6.7.8 56324 9999\r\n" > "${_proxyrequest_file}"
+sleep 2
+_check_go_ahead=$(cat "${_proxyoutput_file}")
+if [ "${_check_go_ahead}" != "go ahead" ]; then
+    printf " expected go ahead return from request to sendProxy host\n"
+    exit 1
+fi
+
+printf "GET / HTTP/1.0\r\nHost: test\r\n\n\n" > "${_proxyrequest_file}"
+_expected_return="go ahead
+HTTP/1.1 200 OK
+Server: nginx/1.17.10
+Content-Type: text/plain
+Content-Length: 20
+Connection: close
+
+Hello world: 1.2.3.4"
+_check_return="$(cat "${_proxyoutput_file}" | grep -v "Date:" | tr -d '\r')"
+if [ "${_check_return}" != "${_expected_return}" ]; then
+    printf " expected return data from request to sendProxy host to match. Got: %s. Expected: %s\n" "${_check_return}" "${_expected_return}"
+    exit 1
+fi
+sleep 2
+printf "%s\n" "$(cat "${_proxyoutput_file}")"
+kill $(cat "${_netcatpid_file}")
+rm "${_netcatpid_file}"
+rm "${_proxyrequest_file}"
+rm "${_proxyoutput_file}"
 
 # TODO: FIXME: find a way to automate call and responses between client and hosts (see doc/MANUAL_VERIFICATION.md)
 
@@ -245,6 +298,7 @@ _test_request_proxy_protocol_mapping_mapped "${haproxy_port_proxyprotocol_mapped
 # Clean up
 docker stop "${webserver_container_name}" && docker rm "${webserver_container_name}"
 docker stop "${proxy_container_name}" && docker rm "${proxy_container_name}"
+docker stop "${nginx_container_name}" && docker rm "${nginx_container_name}"
 docker stop "${haproxy_container_name}" && docker rm "${haproxy_container_name}"
 
 printf "Tests completed!\n"
