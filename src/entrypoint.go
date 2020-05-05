@@ -584,6 +584,288 @@ func main() {
     var currentHostPortsMaxConnections map[int]int;
     currentHostPortsMaxConnections = make(map[int]int);
 
+    // Handle listeners for range of cluster ports
+    // TODO: FIXME:
+    //const clusterPortsRangeMin = 1025;
+    const clusterPortsRangeMin = 29888;
+    const clusterPortsRangeMax = 29999;
+    for clusterPort := clusterPortsRangeMin; clusterPort <= clusterPortsRangeMax; clusterPort++ {
+        var listener net.Listener = func(mode string, address string) (net.Listener) {
+            listen, err := net.Listen(mode, address);
+            if(err != nil) {
+                log.Printf("Error listening to %s in mode %s: %v", address, mode, err);
+                os.Exit(1);
+            }
+            //log.Printf("Listening to %s", address);
+            return listen;
+        } (networkMode, listenerHost + ":" + strconv.Itoa(clusterPort));
+        go func(listener net.Listener) {
+            // Transform: forward all connections to handler
+            for {
+                // Take a new connection
+                var connection net.Conn;
+                var err error;
+                connection, err = listener.Accept();
+                if(err != nil) {
+                    log.Printf("Error accepting connection: %v", err);
+                    return;
+                } else {
+                    log.Printf("Accepted connection from %s (via %s)", connection.LocalAddr(), connection.RemoteAddr());
+                }
+
+                // Iterate over list of hosts
+                // TODO: handle one at a time iteration
+                //         -> procedures can only be started the previous one signals with OK or FAILURE
+                var foundValidHost bool = false;
+
+                // Check presence of proxy protocol
+                var clientIp, proxyIp, clientPort, proxyPort = func() (string, string, int, int) {
+                    var err error;
+                    var connectionReader *bufio.Reader;
+                    connectionReader = bufio.NewReader(connection);
+                    var connectionReaderBufferCount int;
+                    var connectionReaderBuffer []byte;
+
+                    // Check proxy protocol header
+                    const proxyProtocolHeaderString string = "PROXY ";
+                    const proxyProtocolHeaderStringLen int = len(proxyProtocolHeaderString);
+                    connectionReaderBuffer = make([]byte, proxyProtocolHeaderStringLen);
+                    // Read initial header
+                    connectionReaderBufferCount, err = connectionReader.Read(connectionReaderBuffer);
+                    // Check header buffer is valid, count matches expected length and buffer match expected content
+                    if(err != nil || connectionReaderBufferCount != proxyProtocolHeaderStringLen ||
+                            !bytes.Equal(connectionReaderBuffer, []byte(proxyProtocolHeaderString))) {
+                        log.Printf("Error parsing proxy protocol header prefix: %s. Error: %v", connectionReaderBuffer, err);
+                        return "", "", 0, 0;
+                    }
+
+                    // Check case of unknown proxy protocol
+                    const proxyProtocolUnknownString string = "UNKNOWN\r\n";
+                    var proxyProtocolUnknownStringLen int = len(proxyProtocolUnknownString);
+                    connectionReaderBuffer, err = connectionReader.Peek(proxyProtocolUnknownStringLen);
+                    // Check unknwon buffer is valid and data matches expected content
+                    if(err != nil || bytes.Equal(connectionReaderBuffer, []byte(proxyProtocolUnknownString))) {
+                        log.Printf("Error parsing proxy protocol unknown: %v", err);
+                        return "", "", 0, 0;
+                    }
+
+                    // Check TCP4 proxy protocol case
+                    // Reference: "PROXY TCP4 255.255.255.255 255.255.255.255 65535 65535\r\n"
+                    // TODO: add support to TCP6
+                    const proxyProtocolTCP4String string = "TCP4 ";
+                    const proxyProtocolTCP4StringLen int = len(proxyProtocolTCP4String);
+                    connectionReaderBuffer = make([]byte, proxyProtocolTCP4StringLen);
+                    connectionReaderBufferCount, err = connectionReader.Read(connectionReaderBuffer)
+                        // Check buffer is valid, count matches expected length and buffer matches expected content
+                        if(err != nil || connectionReaderBufferCount != proxyProtocolTCP4StringLen ||
+                                !bytes.Equal(connectionReaderBuffer, []byte(proxyProtocolTCP4String))) {
+                            log.Printf("Error parsing proxy protocol inet protocol: %s. Error: ", connectionReaderBuffer, err);
+                            return "", "", 0, 0;
+                        }
+
+                    // Read client IP address
+                    var proxyProtocolClientIpString string;
+                    proxyProtocolClientIpString, err = connectionReader.ReadString(' ');
+                    if(err != nil) {
+                        log.Printf("Error parsing proxy protocol client IP: %v", err);
+                        return "", "", 0, 0;
+                    }
+                    // Adjust string
+                    var proxyProtocolClientIpStringLen int;
+                    proxyProtocolClientIpStringLen = len(proxyProtocolClientIpString);
+                    proxyProtocolClientIpString = proxyProtocolClientIpString[:proxyProtocolClientIpStringLen-1];
+                    // Parse IP
+                    var proxyProtocolClientIp net.IP;
+                    proxyProtocolClientIp = net.ParseIP(proxyProtocolClientIpString);
+                    if(proxyProtocolClientIp == nil) {
+                        log.Printf("Error parsing client IP: %s", proxyProtocolClientIpString);
+                        return "", "", 0, 0;
+                    }
+
+                    // Read proxy IP address
+                    var proxyProtocolProxyIpString string;
+                    proxyProtocolProxyIpString, err = connectionReader.ReadString(' ');
+                    if(err != nil) {
+                        log.Printf("Error parsing proxy protocol proxy IP: %v", err);
+                        return "", "", 0, 0;
+                    }
+                    // Adjust string
+                    var proxyProtocolProxyIpStringLen int;
+                    proxyProtocolProxyIpStringLen = len(proxyProtocolProxyIpString);
+                    proxyProtocolProxyIpString = proxyProtocolProxyIpString[:proxyProtocolProxyIpStringLen-1];
+                    // Parse IP
+                    var proxyProtocolProxyIp net.IP;
+                    proxyProtocolProxyIp = net.ParseIP(proxyProtocolProxyIpString);
+                    if(proxyProtocolProxyIp == nil) {
+                        log.Printf("Error parsing proxy IP: %s", proxyProtocolClientIpString);
+                        return "", "", 0, 0;
+                    }
+
+                    // Read client port number
+                    var proxyProtocolClientPortString string;
+                    proxyProtocolClientPortString, err = connectionReader.ReadString(' ');
+                    if(err != nil) {
+                        log.Printf("Error parsing proxy protocol client port: %v", err);
+                        return "", "", 0, 0;
+                    }
+                    // Adjust number
+                    var proxyProtocolClientPortStringLen int;
+                    proxyProtocolClientPortStringLen = len(proxyProtocolClientPortString);
+                    proxyProtocolClientPortString = proxyProtocolClientPortString[:proxyProtocolClientPortStringLen-1];
+                    // Parse port
+                    var proxyProtocolClientPort int;
+                    proxyProtocolClientPort, err = strconv.Atoi(proxyProtocolClientPortString);
+                    if(err != nil) {
+                        log.Printf("Error parsing proxy protocol client port: %v", err);
+                        return "", "", 0, 0;
+                    }
+
+                    // Read proxy port number
+                    var proxyProtocolProxyPortString string;
+                    proxyProtocolProxyPortString, err = connectionReader.ReadString('\r');
+                    if(err != nil) {
+                        log.Printf("Error parsing proxy protocol proxy port: %v", err);
+                        return "", "", 0, 0;
+                    }
+                    // Adjust number
+                    var proxyProtocolProxyPortStringLen int;
+                    proxyProtocolProxyPortStringLen = len(proxyProtocolProxyPortString);
+                    proxyProtocolProxyPortString = proxyProtocolProxyPortString[:proxyProtocolProxyPortStringLen-1];
+                    // Parse port
+                    var proxyProtocolProxyPort int;
+                    proxyProtocolProxyPort, err = strconv.Atoi(proxyProtocolProxyPortString);
+                    if(err != nil) {
+                        log.Printf("Error parsing proxy protocol proxy port: %v", err);
+                        return "", "", 0, 0;
+                    }
+
+                    // Read trailing characters
+                    var proxyProtocolTrailingByte byte;
+                    proxyProtocolTrailingByte, err = connectionReader.ReadByte();
+                    if(err != nil || proxyProtocolTrailingByte != '\n') {
+                        log.Printf("Error parsing proxy protocol trailing byte: %v", err);
+                        return "", "", 0, 0;
+                    }
+
+                    return proxyProtocolClientIpString, proxyProtocolProxyIpString, proxyProtocolClientPort, proxyProtocolProxyPort;
+                } ();
+
+                signalDone := make(chan struct{});
+                for ip, port := range hostsConfiguration {
+                    signalNext := make(chan struct{});
+                    if(foundValidHost) {
+                        break;
+                    }
+                    log.Printf("[host] Trying to connect to host: %s:%d", ip, port);
+                    // Transform: forward connection to handler
+                    go func(conn net.Conn) {
+                        log.Printf("[host] Handling remote connection: %s\n", connection.RemoteAddr());
+
+                        // Reply port mapping status
+                        log.Printf("[host] Reading back proxy protocol line. inet: tcp | Remote clientip: %s, clientport %d | Proxy proxyip: %s, proxyport: %d\n", clientIp, clientPort, proxyIp, proxyPort);
+                        if(proxyPort == 0) {
+                            log.Printf("[host] Error reading back from proxy protocol line. Proxy port: %d", proxyPort);
+                            //err = connection.Close();
+                            if(err != nil) {
+                                log.Printf("[host] Error closing connection: %s. Error: %v", connection.RemoteAddr(), err);
+                            }
+                            close(signalNext);
+                            return;
+                        } else {
+                            // Pass the connection to handler
+                            if(connection != nil) {
+                                go func(mode string, address string, conn net.Conn) {
+                                    var hostConnection net.Conn;
+                                    var err error;
+
+                                    // Try to connect to host
+                                    var currentHostPort = port;
+                                    var host = address + ":" + strconv.Itoa(currentHostPort);
+
+                                    // TODO: FIXME: expose timeout
+                                    var hostConnectionTimeout time.Duration;
+                                    // TODO: FIXME: error checking
+                                    hostConnectionTimeout, _ = time.ParseDuration("3s");
+                                    hostConnection, err = net.DialTimeout(mode, host, hostConnectionTimeout);
+                                    if(err == nil) {
+                                        log.Printf("[host] Connected to %s", host);
+
+                                        //if(currentSendProxyFlag) {
+                                        if(true) {
+                                            var proxyLine = "PROXY TCP4 " + clientIp + " " + proxyIp + " " + strconv.Itoa(clientPort) + " " + strconv.Itoa(proxyPort) + "\r\n";
+                                            fmt.Fprintf(hostConnection, proxyLine);
+                                            log.Printf("[host] sendProxy is set");
+                                        }
+
+                                        var isConnected = true; // TODO: FIXME: atomic
+                                        foundValidHost = true; // TODO: FIXME: atomic
+
+                                        // Input: Send data from received connection to host
+                                        go func() {
+                                            defer func() {
+                                                log.Printf("[host] Closing input host connection...");
+                                                if(isConnected) { // TODO: FIXME: atomic
+                                                    isConnected = false;
+                                                }
+                                            } ();
+
+                                            var err error;
+                                            _, err = io.Copy(conn, hostConnection);
+                                            if(err != nil) {
+                                                log.Printf("[host] Error copying data from cluster to host: %v", err);
+                                                //hostConnection.Close();
+                                                //close(signalDone);
+                                                return;
+                                            }
+                                        }();
+
+                                        // Output: send data from host back to the original connection
+                                        go func() {
+                                            defer func() {
+                                                log.Printf("[host] Closing output host connection...");
+                                                if(isConnected) { // TODO: FIXME: atomic
+                                                    isConnected = false;
+                                                }
+                                            } ();
+
+                                            var err error;
+                                            log.Printf("[host] Copying to hostConnection %s and conn %s", hostConnection.RemoteAddr(), conn.RemoteAddr());
+                                            _, err = io.Copy(hostConnection, conn);
+                                            if(err != nil) {
+                                                log.Printf("[host] Error copying data from host to cluster: %v", err);
+                                                //hostConnection.Close();
+                                                //close(signalDone);
+                                                return;
+                                            }
+                                        }();
+                                    } else {
+                                        log.Printf("Error connecting to %s in mode %s. Message: %v", host, mode, err);
+                                        //err = connection.Close();
+                                        if(err != nil) {
+                                            log.Printf("Error closing connection: %s. Error: %v", connection.RemoteAddr(), err);
+                                        }
+                                        close(signalNext);
+                                        return;
+                                    }
+                                } (networkMode, ip, connection);
+                            } else {
+                                log.Printf("[host] Hosts routine for %s, over and out!\n", listener.Addr());
+                                //err = connection.Close();
+                                if(err != nil) {
+                                    log.Printf("[host] Error closing connection: %s. Error: %v", connection.RemoteAddr(), err);
+                                }
+                                close(signalNext);
+                                return;
+                            }
+                        }
+                    } (connection);
+                    <-signalNext;
+                }
+                <-signalDone;
+            }
+        } (listener);
+    }
+
     // Handle listener connections
     go func(listener net.Listener) {
         // Transform: forward all connections to handler
@@ -599,234 +881,6 @@ func main() {
                 log.Printf("Accepted connection from %s (via %s)", connection.LocalAddr(), connection.RemoteAddr());
             }
 
-            // Iterate over list of hosts
-            // TODO: handle one at a time iteration
-            //         -> procedures can only be started the previous one signals with OK or FAILURE
-            var foundValidHost bool = false;
-            for ip, port := range hostsConfiguration {
-                if(foundValidHost) {
-                    break;
-                }
-                log.Printf("[host] Trying to connect to host: %s:%d", ip, port);
-                // Transform: forward connection to handler
-                go func(conn net.Conn) {
-                    log.Printf("[host] Handling remote connection: %s\n", connection.RemoteAddr());
-
-                    // Check presence of proxy protocol
-                    var clientIp, proxyIp, clientPort, proxyPort = func() (string, string, int, int) {
-                        var err error;
-                        var connectionReader *bufio.Reader;
-                        connectionReader = bufio.NewReader(connection);
-                        var connectionReaderBufferCount int;
-                        var connectionReaderBuffer []byte;
-
-                        // Check proxy protocol header
-                        const proxyProtocolHeaderString string = "PROXY ";
-                        const proxyProtocolHeaderStringLen int = len(proxyProtocolHeaderString);
-                        connectionReaderBuffer = make([]byte, proxyProtocolHeaderStringLen);
-                        // Read initial header
-                        connectionReaderBufferCount, err = connectionReader.Read(connectionReaderBuffer);
-                        // Check header buffer is valid, count matches expected length and buffer match expected content
-                        if(err != nil || connectionReaderBufferCount != proxyProtocolHeaderStringLen ||
-                                !bytes.Equal(connectionReaderBuffer, []byte(proxyProtocolHeaderString))) {
-                            log.Printf("Error parsing proxy protocol header prefix: %s. Error: %v", connectionReaderBuffer, err);
-                            return "", "", 0, 0;
-                        }
-
-                        // Check case of unknown proxy protocol
-                        const proxyProtocolUnknownString string = "UNKNOWN\r\n";
-                        var proxyProtocolUnknownStringLen int = len(proxyProtocolUnknownString);
-                        connectionReaderBuffer, err = connectionReader.Peek(proxyProtocolUnknownStringLen);
-                        // Check unknwon buffer is valid and data matches expected content
-                        if(err != nil || bytes.Equal(connectionReaderBuffer, []byte(proxyProtocolUnknownString))) {
-                            log.Printf("Error parsing proxy protocol unknown: %v", err);
-                            return "", "", 0, 0;
-                        }
-
-                        // Check TCP4 proxy protocol case
-                        // Reference: "PROXY TCP4 255.255.255.255 255.255.255.255 65535 65535\r\n"
-                        // TODO: add support to TCP6
-                        const proxyProtocolTCP4String string = "TCP4 ";
-                        const proxyProtocolTCP4StringLen int = len(proxyProtocolTCP4String);
-                        connectionReaderBuffer = make([]byte, proxyProtocolTCP4StringLen);
-                        connectionReaderBufferCount, err = connectionReader.Read(connectionReaderBuffer)
-                            // Check buffer is valid, count matches expected length and buffer matches expected content
-                            if(err != nil || connectionReaderBufferCount != proxyProtocolTCP4StringLen ||
-                                    !bytes.Equal(connectionReaderBuffer, []byte(proxyProtocolTCP4String))) {
-                                log.Printf("Error parsing proxy protocol inet protocol: %s. Error: ", connectionReaderBuffer, err);
-                                return "", "", 0, 0;
-                            }
-
-                        // Read client IP address
-                        var proxyProtocolClientIpString string;
-                        proxyProtocolClientIpString, err = connectionReader.ReadString(' ');
-                        if(err != nil) {
-                            log.Printf("Error parsing proxy protocol client IP: %v", err);
-                            return "", "", 0, 0;
-                        }
-                        // Adjust string
-                        var proxyProtocolClientIpStringLen int;
-                        proxyProtocolClientIpStringLen = len(proxyProtocolClientIpString);
-                        proxyProtocolClientIpString = proxyProtocolClientIpString[:proxyProtocolClientIpStringLen-1];
-                        // Parse IP
-                        var proxyProtocolClientIp net.IP;
-                        proxyProtocolClientIp = net.ParseIP(proxyProtocolClientIpString);
-                        if(proxyProtocolClientIp == nil) {
-                            log.Printf("Error parsing client IP: %s", proxyProtocolClientIpString);
-                            return "", "", 0, 0;
-                        }
-
-                        // Read proxy IP address
-                        var proxyProtocolProxyIpString string;
-                        proxyProtocolProxyIpString, err = connectionReader.ReadString(' ');
-                        if(err != nil) {
-                            log.Printf("Error parsing proxy protocol proxy IP: %v", err);
-                            return "", "", 0, 0;
-                        }
-                        // Adjust string
-                        var proxyProtocolProxyIpStringLen int;
-                        proxyProtocolProxyIpStringLen = len(proxyProtocolProxyIpString);
-                        proxyProtocolProxyIpString = proxyProtocolProxyIpString[:proxyProtocolProxyIpStringLen-1];
-                        // Parse IP
-                        var proxyProtocolProxyIp net.IP;
-                        proxyProtocolProxyIp = net.ParseIP(proxyProtocolProxyIpString);
-                        if(proxyProtocolProxyIp == nil) {
-                            log.Printf("Error parsing proxy IP: %s", proxyProtocolClientIpString);
-                            return "", "", 0, 0;
-                        }
-
-                        // Read client port number
-                        var proxyProtocolClientPortString string;
-                        proxyProtocolClientPortString, err = connectionReader.ReadString(' ');
-                        if(err != nil) {
-                            log.Printf("Error parsing proxy protocol client port: %v", err);
-                            return "", "", 0, 0;
-                        }
-                        // Adjust number
-                        var proxyProtocolClientPortStringLen int;
-                        proxyProtocolClientPortStringLen = len(proxyProtocolClientPortString);
-                        proxyProtocolClientPortString = proxyProtocolClientPortString[:proxyProtocolClientPortStringLen-1];
-                        // Parse port
-                        var proxyProtocolClientPort int;
-                        proxyProtocolClientPort, err = strconv.Atoi(proxyProtocolClientPortString);
-                        if(err != nil) {
-                            log.Printf("Error parsing proxy protocol client port: %v", err);
-                            return "", "", 0, 0;
-                        }
-
-                        // Read proxy port number
-                        var proxyProtocolProxyPortString string;
-                        proxyProtocolProxyPortString, err = connectionReader.ReadString('\r');
-                        if(err != nil) {
-                            log.Printf("Error parsing proxy protocol proxy port: %v", err);
-                            return "", "", 0, 0;
-                        }
-                        // Adjust number
-                        var proxyProtocolProxyPortStringLen int;
-                        proxyProtocolProxyPortStringLen = len(proxyProtocolProxyPortString);
-                        proxyProtocolProxyPortString = proxyProtocolProxyPortString[:proxyProtocolProxyPortStringLen-1];
-                        // Parse port
-                        var proxyProtocolProxyPort int;
-                        proxyProtocolProxyPort, err = strconv.Atoi(proxyProtocolProxyPortString);
-                        if(err != nil) {
-                            log.Printf("Error parsing proxy protocol proxy port: %v", err);
-                            return "", "", 0, 0;
-                        }
-
-                        // Read trailing characters
-                        var proxyProtocolTrailingByte byte;
-                        proxyProtocolTrailingByte, err = connectionReader.ReadByte();
-                        if(err != nil || proxyProtocolTrailingByte != '\n') {
-                            log.Printf("Error parsing proxy protocol trailing byte: %v", err);
-                            return "", "", 0, 0;
-                        }
-
-                        return proxyProtocolClientIpString, proxyProtocolProxyIpString, proxyProtocolClientPort, proxyProtocolProxyPort;
-                    } ();
-
-                    // Reply port mapping status
-                    log.Printf("[host] Reading back proxy protocol line. inet: tcp | Remote clientip: %s, clientport %d | Proxy proxyip: %s, proxyport: %d\n", clientIp, clientPort, proxyIp, proxyPort);
-                    if(proxyPort == 0) {
-                        log.Printf("[host] Error reading back from proxy protocol line. Proxy port: %d", proxyPort);
-                        err = connection.Close();
-                        if(err != nil) {
-                            log.Printf("[host] Error closing connection: %s. Error: %v", connection.RemoteAddr(), err);
-                        }
-                        return;
-                    } else {
-                        // Pass the connection to handler
-                        if(connection != nil) {
-                            go func(mode string, address string, conn net.Conn) {
-                                var hostConnection net.Conn;
-                                var err error;
-
-                                // Try to connect to host
-                                var currentHostPort = port;
-                                var host = address + ":" + strconv.Itoa(currentHostPort);
-
-                                hostConnection, err = net.Dial(mode, host);
-                                if(err == nil) {
-                                    log.Printf("[host] Connected to %s", host);
-
-                                    //if(currentSendProxyFlag) {
-                                    if(true) {
-                                        var proxyLine = "PROXY TCP4 " + clientIp + " " + proxyIp + " " + strconv.Itoa(clientPort) + " " + strconv.Itoa(proxyPort) + "\r\n";
-                                        fmt.Fprintf(hostConnection, proxyLine);
-                                        log.Printf("[host] sendProxy is set");
-                                    }
-
-                                    var isConnected = true; // TODO: FIXME: atomic
-                                    foundValidHost = true; // TODO: FIXME: atomic
-
-                                    // Input: Send data from received connection to host
-                                    go func() {
-                                        defer func() {
-                                            log.Printf("[host] Closing input host connection...");
-                                            if(isConnected) { // TODO: FIXME: atomic
-                                                isConnected = false;
-                                            }
-                                        } ();
-
-                                        var err error;
-                                        _, err = io.Copy(conn, hostConnection);
-                                        if(err != nil) {
-                                            log.Printf("[host] Error copying data from cluster to host: %v", err);
-                                            hostConnection.Close();
-                                            return;
-                                        }
-                                    }();
-
-                                    // Output: send data from host back to the original connection
-                                    go func() {
-                                        defer func() {
-                                            log.Printf("[host] Closing output host connection...");
-                                            if(isConnected) { // TODO: FIXME: atomic
-                                                isConnected = false;
-                                            }
-                                        } ();
-
-                                        var err error;
-                                        log.Printf("[host] Copying to hostConnection %s and conn %s", hostConnection.RemoteAddr(), conn.RemoteAddr());
-                                        _, err = io.Copy(hostConnection, conn);
-                                        if(err != nil) {
-                                            log.Printf("[host] Error copying data from host to cluster: %v", err);
-                                            hostConnection.Close();
-                                            return;
-                                        }
-                                    }();
-                                }
-                            } (networkMode, ip, connection);
-                        } else {
-                            log.Printf("[host] Hosts routine for %s, over and out!\n", listener.Addr());
-                            err = connection.Close();
-                            if(err != nil) {
-                                log.Printf("[host] Error closing connection: %s. Error: %v", connection.RemoteAddr(), err);
-                            }
-                            return;
-                        }
-                    }
-                } (connection);
-            }
 
             // Transform: forward connection to handler
             go func(conn net.Conn) {
