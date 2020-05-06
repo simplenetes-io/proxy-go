@@ -785,7 +785,7 @@ func main() {
                                     // TODO: FIXME: expose timeout
                                     var hostConnectionTimeout time.Duration;
                                     // TODO: FIXME: error checking
-                                    hostConnectionTimeout, _ = time.ParseDuration("3s");
+                                    hostConnectionTimeout, _ = time.ParseDuration("1s");
                                     hostConnection, err = net.DialTimeout(mode, host, hostConnectionTimeout);
                                     if(err == nil) {
                                         log.Printf("[host] Connected to %s", host);
