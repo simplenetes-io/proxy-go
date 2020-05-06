@@ -1216,6 +1216,25 @@ func main() {
         }
     } ();
 
+    var watchChannelHosts chan bool;
+    go func() {
+        var fileHasChanged bool;
+        for {
+            watchChannelHosts = make(chan bool);
+            go watchForFileChanges(hostsConfigurationFile, watchChannelHosts);
+            fileHasChanged = <-watchChannelHosts;
+            if(fileHasChanged) {
+                log.Printf("Hosts configuration file has changed: %s. Reloading...\n", hostsConfigurationFile);
+                var configuration = loadHostsConfiguration(hostsConfigurationFile);
+                if(configuration != nil) {
+                    log.Printf("Hosts configuration: %v\n", hostsConfiguration);
+                    // TODO: FIXME: hostsConfiguration should drop all connections that were removed in the reload process (diff)
+                    hostsConfiguration = configuration;
+                }
+            }
+        }
+    } ();
+
     // Install SIGHUP for handling reload
     var signalChannel chan os.Signal = make(chan os.Signal, 1);
     go func() {
@@ -1238,6 +1257,12 @@ func main() {
     go handlePorts(networkMode, hostAddress, portsConfiguration, &listeners);
 
     // TODO: consider readding sync.WaitGroup -> Wait instead of infinite loop
-    //for {}
-    <-watchChannel;
+    for {
+        select {
+            case <-watchChannel:
+                log.Printf("Ports configuration signal")
+            case <-watchChannelHosts:
+                log.Printf("Hosts configuration signal")
+        }
+    }
 }
