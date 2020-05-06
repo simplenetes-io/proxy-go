@@ -15,6 +15,7 @@ import (
     "regexp"
     "strconv"
     "strings"
+    "sync/atomic"
     "syscall"
     "time"
 )
@@ -751,7 +752,10 @@ func main() {
                 } ();
 
                 signalDone := make(chan struct{});
+                var hostsConfigurationLen int = len(hostsConfiguration);
+                var hostsConfigurationCounter int = 0;
                 for ip, port := range hostsConfiguration {
+                    hostsConfigurationCounter++;
                     signalNext := make(chan struct{});
                     if(foundValidHost) {
                         break;
@@ -798,14 +802,22 @@ func main() {
                                         }
 
                                         var isConnected = true; // TODO: FIXME: atomic
+                                        var isConnectedAtomic int32;
+                                        atomic.StoreInt32(&isConnectedAtomic, 1);
+
                                         foundValidHost = true; // TODO: FIXME: atomic
 
                                         // Input: Send data from received connection to host
                                         go func() {
                                             defer func() {
                                                 log.Printf("[host] Closing input host connection...");
-                                                if(isConnected) { // TODO: FIXME: atomic
+                                                if(atomic.LoadInt32(&isConnectedAtomic) == 1) {
                                                     isConnected = false;
+                                                    atomic.StoreInt32(&isConnectedAtomic, 0);
+                                                    hostConnection.Close();
+                                                    conn.Close();
+                                                    close(signalNext);
+                                                    close(signalDone);
                                                 }
                                             } ();
 
@@ -823,8 +835,13 @@ func main() {
                                         go func() {
                                             defer func() {
                                                 log.Printf("[host] Closing output host connection...");
-                                                if(isConnected) { // TODO: FIXME: atomic
+                                                if(atomic.LoadInt32(&isConnectedAtomic) == 1) {
                                                     isConnected = false;
+                                                    atomic.StoreInt32(&isConnectedAtomic, 0);
+                                                    hostConnection.Close();
+                                                    conn.Close();
+                                                    close(signalNext);
+                                                    close(signalDone);
                                                 }
                                             } ();
 
@@ -845,6 +862,10 @@ func main() {
                                             log.Printf("Error closing connection: %s. Error: %v", connection.RemoteAddr(), err);
                                         }
                                         close(signalNext);
+                                        if(hostsConfigurationCounter >= hostsConfigurationLen) {
+                                            log.Printf("No available hosts");
+                                            close(signalDone);
+                                        }
                                         return;
                                     }
                                 } (networkMode, ip, connection);
