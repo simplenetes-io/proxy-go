@@ -20,6 +20,10 @@ if ! command -v docker >/dev/null; then
     printf "Unable to find external program: docker\n" >&2
     exit 1
 fi
+if ! command -v go >/dev/null; then
+    printf "Unable to find external program: go\n" >&2
+    exit 1
+fi
 if ! command -v netcat >/dev/null; then
     printf "Unable to find external program: netcat\n" >&2
     exit 1
@@ -103,11 +107,13 @@ _test_request_failure()
 
 _test_request_proxy_protocol_mapping_unmapped()
 {
-    port="$1"
-    printf "Host: send PROXY PROTOCOL request to %s..." "${port}"
+    host="$1"
+    port="${proxy_port}"
+    clusterPort="$2"
+    printf "Host: send PROXY PROTOCOL request to %s (unmapped)..." "${port}"
 
     # Verify status code
-    if ! _status="$(printf "PROXY TCP4 192.168.0.1 192.168.0.11 56324 443\r\n" | nc "${DOCKER_IP}" "${port}")"; then
+    if ! _status="$(printf "PROXY TCP4 192.168.0.1 192.168.0.11 56324 %s\r\n" "${clusterPort}" | nc "${host}" "${port}")"; then
         printf " failed to send request to %s. Data: %s\n" "${port}" "${_status}"
         exit 1
     fi
@@ -123,15 +129,16 @@ _test_request_proxy_protocol_mapping_unmapped()
 
 _test_request_proxy_protocol_mapping_mapped()
 {
-    port="$1"
-    printf "Host: send PROXY PROTOCOL request to %s..." "${port}"
+    host="$1"
+    port="$2"
+    printf "Host: send PROXY PROTOCOL request to %s (mapped)..." "${port}"
 
     # Run request in background
     printf "starting in background...\n"
-    printf "PROXY TCP4 192.168.0.1 192.168.0.11 56324 ${haproxy_port_proxyprotocol_mapped}\r\n" | nc "${DOCKER_IP}" "${port}" > "./tmp_output.txt" &
+    printf "PROXY TCP4 192.168.0.1 192.168.0.11 56324 ${haproxy_port_proxyprotocol_mapped}\r\n" | nc "${host}" "${port}" > "./tmp_output.txt" &
     _pid="$!"
 
-    sleep 1
+    sleep 3
     _status=$(cat "./tmp_output.txt")
     kill "${_pid}"
 
@@ -242,17 +249,17 @@ proxy_port=32767
 # Cannot send regular request to 32767
 _test_request_failure "${proxy_port}"
 # Send PROXY PROTOCOL request
-_test_request_proxy_protocol_mapping_unmapped "${proxy_port}"
+_test_request_proxy_protocol_mapping_unmapped "${DOCKER_IP}" "${proxy_port}"
 
 # Send request to new proxy via Haproxy
 # Regular proxy backend is expected to fail
 _test_request_failure "${haproxy_port_regular}"
 # Proxy protocol request via send-proxy
 # Unmapped
-_test_request_proxy_protocol_mapping_unmapped "${haproxy_port_proxyprotocol_unmapped}"
+_test_request_proxy_protocol_mapping_unmapped "${DOCKER_IP}" "${haproxy_port_proxyprotocol_unmapped}"
 # TODO: FIXME: mapped but inactive ?
 # Mapped
-_test_request_proxy_protocol_mapping_mapped "${haproxy_port_proxyprotocol_mapped}"
+_test_request_proxy_protocol_mapping_mapped "${DOCKER_IP}" "${haproxy_port_proxyprotocol_mapped}"
 
 # sendProxy flag
 printf "======\n[New proxy - sendProxy]\n"
@@ -291,6 +298,16 @@ kill $(cat "${_netcatpid_file}")
 rm "${_netcatpid_file}"
 rm "${_proxyrequest_file}"
 rm "${_proxyoutput_file}"
+
+# cluster ports proxy
+printf "======\n[Cluster ports proxy]\n"
+go run ./src/entrypoint.go "127.0.0.1" &
+sleep 3
+_local_execution_pid="$!"
+_test_request_proxy_protocol_mapping_unmapped "127.0.0.1" "${haproxy_port_proxyprotocol_mapped}"
+sleep 3
+kill "${_local_execution_pid}"
+
 
 # TODO: FIXME: find a way to automate call and responses between client and hosts (see doc/MANUAL_VERIFICATION.md)
 
