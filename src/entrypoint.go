@@ -30,6 +30,16 @@ type PortsConfigurationData struct {
     sendProxyFlag bool;
 }
 
+type ProgramSettings struct {
+    configurationFile string;
+    portsConfigurationFile string;
+    hostsConfigurationFile string;
+    listenerHost string;
+    listenerPort int;
+    clusterPortsRangeMin int;
+    clusterPortsRangeMax int;
+}
+
 type PortsConfigurationMap map[int][]PortsConfigurationData;
 type HostsConfigurationMap map[string]int;
 
@@ -385,6 +395,95 @@ func loadHostsConfiguration(cfgFilePath string) (HostsConfigurationMap) {
     return hostsConfiguration;
 }
 
+func loadProgramSettings(cfgFilePath string) (ProgramSettings) {
+    // Open configuration file
+    var cfgFile = func(filePath string) (*os.File) {
+        file, err := os.Open(filePath);
+        if(err != nil) {
+            log.Printf("Error opening file %s for reading: %v", filePath, err);
+            os.Exit(1);
+        }
+        return file;
+    } (cfgFilePath);
+    defer cfgFile.Close();
+
+    // Extract data from configuration file
+    var programSettings = func(file *os.File) (ProgramSettings) {
+        var data ProgramSettings;
+        var scanner *bufio.Scanner = bufio.NewScanner(file);
+
+        // Try to iterate over all file contents
+        for scanner.Scan() {
+            // Read line
+            var line string;
+            line = scanner.Text();
+            log.Printf("Program settings line: %s\n", line);
+
+            // Iterate over all entries
+            var currentEntry string = line;
+            var currentEntryValues []string = strings.Split(currentEntry, "=");
+            var currentEntryValuesLen int = len(currentEntryValues);
+            if(currentEntryValuesLen != 2) {
+                log.Printf("Error while reading program settings line: %s. Expected format: setting:value. Values: %s. Length: %d", currentEntry, currentEntryValues, currentEntryValuesLen);
+                os.Exit(1);
+            } else {
+                log.Printf("Parsing program settings entry: %s\n", currentEntry);
+                var err error;
+                var setting string;
+                var value string;
+                setting = currentEntryValues[0];
+                value = strings.Trim(currentEntryValues[1], "\"");
+                switch setting {
+                    case "configurationFile":
+                        data.configurationFile = value;
+                    case "portsConfigurationFile":
+                        data.portsConfigurationFile = value;
+                    case "hostsConfigurationFile":
+                        data.hostsConfigurationFile = value;
+                    case "listenerHost":
+                        data.listenerHost = value;
+                    case "listenerPort":
+                        data.listenerPort, err = strconv.Atoi(value);
+                        if(err != nil) {
+                            log.Printf("Error converting listenerPort: %s. Message: %v", value, err);
+                            os.Exit(1);
+                        }
+                    case "clusterPortsRangeMin":
+                        data.clusterPortsRangeMin, err = strconv.Atoi(value);
+                        if(err != nil) {
+                            log.Printf("Error converting clusterPortsRangeMin: %s. Message: %v", value, err);
+                            os.Exit(1);
+                        }
+                    case "clusterPortsRangeMax":
+                        data.clusterPortsRangeMax, err = strconv.Atoi(value);
+                        if(err != nil) {
+                            log.Printf("Error converting clusterPortsRangeMax: %s. Message: %v", value, err);
+                            os.Exit(1);
+                        }
+                    default:
+                        log.Printf("Skipping unknown entry: %s", value, err);
+                }
+
+            }
+
+        }
+
+        // In case of error during Scan(), expect to catch error here
+        var err error = nil;
+        err = scanner.Err();
+        if(err != nil) {
+            log.Printf("Error reading from file: %v", err);
+            os.Exit(1);
+        }
+
+        // Otherwise, assume data is in good condition
+        return data;
+    } (cfgFile);
+
+    // Return loaded configuration data
+    return programSettings;
+}
+
 func loadListener(networkMode string, clusterAddress string, previousPortsConfiguration ConfigurationMap, newPortsConfiguration ConfigurationMap, currentListeners *map[int]net.Listener) () {
     var port int;
     // close all open ports which are no longer part of configuration
@@ -535,16 +634,19 @@ func main() {
     }
 
     // Program settings
-    //TODO: FIXME: enable customizable configuration path
-    //const configurationFile string = "cfg/ports.cfg";
-    const configurationFile string = "test/ports.cfg";
-    const portsConfigurationFile string = "test/ports.conf";
-    const hostsConfigurationFile string = "test/hosts.txt";
+    const programSettingsFile string = "config/settings.conf";
+    var programSettings ProgramSettings =  loadProgramSettings(programSettingsFile);
+    log.Printf("Program settings: %v\n", programSettings);
+
+    // Configuration settings
+    var configurationFile string = programSettings.configurationFile;
+    var portsConfigurationFile string = programSettings.portsConfigurationFile;
+    var hostsConfigurationFile string = programSettings.hostsConfigurationFile;
 
     // Network settings
     const networkMode string = "tcp";
-    const listenerHost string = "";
-    const listenerPort int = 32767;
+    var listenerHost string = programSettings.listenerHost;
+    var listenerPort int = programSettings.listenerPort;
 
     // Cluster settings (in)
     // Host settings (out)
@@ -586,10 +688,8 @@ func main() {
     currentHostPortsMaxConnections = make(map[int]int);
 
     // Handle listeners for range of cluster ports
-    // TODO: FIXME:
-    //const clusterPortsRangeMin = 1025;
-    const clusterPortsRangeMin = 29888;
-    const clusterPortsRangeMax = 29999;
+    var clusterPortsRangeMin int = programSettings.clusterPortsRangeMin;
+    var clusterPortsRangeMax int = programSettings.clusterPortsRangeMax;
     for clusterPort := clusterPortsRangeMin; clusterPort <= clusterPortsRangeMax; clusterPort++ {
         var listener net.Listener = func(mode string, address string) (net.Listener) {
             listen, err := net.Listen(mode, address);
