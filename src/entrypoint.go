@@ -67,7 +67,7 @@ func loadConfiguration(cfgFilePath string) (ConfigurationMap) {
     var cfgFile = func(filePath string) (*os.File) {
         file, err := os.Open(filePath);
         if(err != nil) {
-            log.Printf("Error opening file %s for reading: %v", filePath, err);
+            log.Printf("Error opening file %s for reading\n%v", filePath, err);
             os.Exit(1);
         }
         return file;
@@ -187,7 +187,7 @@ func loadPortsConfiguration(cfgFilePath string) (PortsConfigurationMap) {
     var cfgFile = func(filePath string) (*os.File) {
         file, err := os.Open(filePath);
         if(err != nil) {
-            log.Printf("Error opening file %s for reading: %v", filePath, err);
+            log.Printf("Error opening file %s for reading\n%v", filePath, err);
             os.Exit(1);
         }
         return file;
@@ -337,7 +337,7 @@ func loadHostsConfiguration(cfgFilePath string) (HostsConfigurationMap) {
     var cfgFile = func(filePath string) (*os.File) {
         file, err := os.Open(filePath);
         if(err != nil) {
-            log.Printf("Error opening file %s for reading: %v", filePath, err);
+            log.Printf("Error opening file %s for reading\n%v", filePath, err);
             os.Exit(1);
         }
         return file;
@@ -400,7 +400,7 @@ func loadProgramSettings(cfgFilePath string) (ProgramSettings) {
     var cfgFile = func(filePath string) (*os.File) {
         file, err := os.Open(filePath);
         if(err != nil) {
-            log.Printf("Error opening file %s for reading: %v", filePath, err);
+            log.Printf("Error opening file %s for reading\n%v", filePath, err);
             os.Exit(1);
         }
         return file;
@@ -634,7 +634,7 @@ func main() {
     }
 
     // Program settings
-    const programSettingsFile string = "config/settings.conf";
+    const programSettingsFile string = "config/settings/settings.conf";
     var programSettings ProgramSettings =  loadProgramSettings(programSettingsFile);
     log.Printf("Program settings: %v\n", programSettings);
 
