@@ -1377,11 +1377,5 @@ func main() {
 
     // TODO: consider readding sync.WaitGroup -> Wait instead of infinite loop
     for {
-        select {
-            case <-watchChannel:
-                log.Printf("Ports configuration signal")
-            case <-watchChannelHosts:
-                log.Printf("Hosts configuration signal")
-        }
     }
 }
