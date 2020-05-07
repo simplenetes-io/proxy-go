@@ -901,9 +901,8 @@ func main() {
                                             log.Printf("[host] sendProxy is set");
                                         }
 
-                                        var isConnected = true; // TODO: FIXME: atomic
-                                        var isConnectedAtomic int32;
-                                        atomic.StoreInt32(&isConnectedAtomic, 1);
+                                        var isConnected int32;
+                                        atomic.StoreInt32(&isConnected, 1);
 
                                         foundValidHost = true; // TODO: FIXME: atomic
 
@@ -911,9 +910,8 @@ func main() {
                                         go func() {
                                             defer func() {
                                                 log.Printf("[host] Closing input host connection...");
-                                                if(atomic.LoadInt32(&isConnectedAtomic) == 1) {
-                                                    isConnected = false;
-                                                    atomic.StoreInt32(&isConnectedAtomic, 0);
+                                                if(atomic.LoadInt32(&isConnected) == 1) {
+                                                    atomic.StoreInt32(&isConnected, 0);
                                                     hostConnection.Close();
                                                     conn.Close();
                                                     close(signalNext);
@@ -935,9 +933,8 @@ func main() {
                                         go func() {
                                             defer func() {
                                                 log.Printf("[host] Closing output host connection...");
-                                                if(atomic.LoadInt32(&isConnectedAtomic) == 1) {
-                                                    isConnected = false;
-                                                    atomic.StoreInt32(&isConnectedAtomic, 0);
+                                                if(atomic.LoadInt32(&isConnected) == 1) {
+                                                    atomic.StoreInt32(&isConnected, 0);
                                                     hostConnection.Close();
                                                     conn.Close();
                                                     close(signalNext);
