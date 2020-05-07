@@ -964,6 +964,7 @@ func main() {
                                         close(signalNext);
                                         if(hostsConfigurationCounter >= hostsConfigurationLen) {
                                             log.Printf("No available hosts");
+                                            conn.Close();
                                             close(signalDone);
                                         }
                                         return;
