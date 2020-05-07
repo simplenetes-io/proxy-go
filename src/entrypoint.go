@@ -461,7 +461,7 @@ func loadProgramSettings(cfgFilePath string) (ProgramSettings) {
                             os.Exit(1);
                         }
                     default:
-                        log.Printf("Skipping unknown entry: %s", value, err);
+                        log.Printf("Skipping unknown entry: %s", value);
                 }
 
             }
@@ -760,7 +760,7 @@ func main() {
                         // Check buffer is valid, count matches expected length and buffer matches expected content
                         if(err != nil || connectionReaderBufferCount != proxyProtocolTCP4StringLen ||
                                 !bytes.Equal(connectionReaderBuffer, []byte(proxyProtocolTCP4String))) {
-                            log.Printf("Error parsing proxy protocol inet protocol: %s. Error: ", connectionReaderBuffer, err);
+                            log.Printf("Error parsing proxy protocol inet protocol: %s. Error: %v", connectionReaderBuffer, err);
                             return "", "", 0, 0;
                         }
 
@@ -1046,7 +1046,7 @@ func main() {
                     // Check buffer is valid, count matches expected length and buffer matches expected content
                     if(err != nil || connectionReaderBufferCount != proxyProtocolTCP4StringLen ||
                         !bytes.Equal(connectionReaderBuffer, []byte(proxyProtocolTCP4String))) {
-                        log.Printf("Error parsing proxy protocol inet protocol: %s. Error: ", connectionReaderBuffer, err);
+                        log.Printf("Error parsing proxy protocol inet protocol: %s. Error: %v", connectionReaderBuffer, err);
                         return "", "", 0, 0;
                     }
 
