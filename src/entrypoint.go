@@ -1221,7 +1221,7 @@ func main() {
     loadListener(networkMode, clusterAddress, previousPortsConfiguration, portsConfiguration, &listeners);
     go handlePorts(networkMode, hostAddress, portsConfiguration, &listeners);
 
-    // TODO: consider readding sync.WaitGroup -> Wait instead of infinite loop
-    for {
+    // Block indefinitely
+    select {
     }
 }
