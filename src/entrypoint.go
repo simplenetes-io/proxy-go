@@ -27,7 +27,6 @@ type ConfigurationMap map[int][]int;
 type PortsConfigurationData struct {
     hostPort int;
     maxConnections int;
-    sendProxyFlag bool;
 }
 
 type ProgramSettings struct {
@@ -168,7 +167,7 @@ func loadConfiguration(cfgFilePath string) (ConfigurationMap) {
  then extracts the file contents and store them into a key-value map.
 
  Base configuration entry format:
-    clusterPort:hostPort:maxConnections:sendProxyFlag
+    clusterPort:hostPort:maxConnections
 
  Configuration example:
     #clusterPortA:hostPort1:100:true clusterPortA:hostPort2:100:false
@@ -260,8 +259,8 @@ func loadPortsConfiguration(cfgFilePath string) (PortsConfigurationMap) {
                 var currentEntry string = lineSplit[lineSplitIndex];
                 var currentEntryValues []string = strings.Split(currentEntry, ":");
                 var currentEntryValuesLen int = len(currentEntryValues);
-                if(currentEntryValuesLen != 4) {
-                    log.Printf("Error while reading configuration line: %s. Expected format: clusterPort:hostPort:maxConnections:sendProxyFlag. Values: %s. Length: %d", currentEntry, currentEntryValues, currentEntryValuesLen);
+                if(currentEntryValuesLen != 3) {
+                    log.Printf("Error while reading configuration line: %s. Expected format: clusterPort:hostPort:maxConnections. Values: %s. Length: %d", currentEntry, currentEntryValues, currentEntryValuesLen);
                     os.Exit(1);
                 } else {
                     log.Printf("Parsing configuration entry: %s\n", currentEntry);
@@ -275,11 +274,6 @@ func loadPortsConfiguration(cfgFilePath string) (PortsConfigurationMap) {
                     portsData.maxConnections, err = strconv.Atoi(currentEntryValues[2]);
                     if(err != nil) {
                         log.Printf("Error converting maxConnections: %s. Message: %v", currentEntryValues[2], err);
-                        os.Exit(1);
-                    }
-                    portsData.sendProxyFlag, err = strconv.ParseBool(currentEntryValues[3]);
-                    if(err != nil) {
-                        log.Printf("Error converting sendProxyFlag: %s. Message: %v", currentEntryValues[3], err);
                         os.Exit(1);
                     }
 
@@ -361,7 +355,7 @@ func loadHostsConfiguration(cfgFilePath string) (HostsConfigurationMap) {
             var currentEntryValues []string = strings.Split(currentEntry, ":");
             var currentEntryValuesLen int = len(currentEntryValues);
             if(currentEntryValuesLen != 2) {
-                log.Printf("Error while reading configuration line: %s. Expected format: clusterPort:hostPort:maxConnections:sendProxyFlag. Values: %s. Length: %d", currentEntry, currentEntryValues, currentEntryValuesLen);
+                log.Printf("Error while reading configuration line: %s. Expected format: ip:port. Values: %s. Length: %d", currentEntry, currentEntryValues, currentEntryValuesLen);
                 os.Exit(1);
             } else {
                 log.Printf("Parsing configuration entry: %s\n", currentEntry);
@@ -1049,13 +1043,6 @@ func main() {
                                     if(err == nil) {
                                         fmt.Fprintf(connection, responseMappingActive);
                                         log.Printf("Connected to %s", host);
-
-                                        var currentSendProxyFlag = ports[hostPortsIndex].sendProxyFlag;
-                                        if(currentSendProxyFlag) {
-                                            var proxyLine = "PROXY TCP4 " + clientIp + " " + proxyIp + " " + strconv.Itoa(clientPort) + " " + strconv.Itoa(proxyPort) + "\r\n";
-                                            fmt.Fprintf(hostConnection, proxyLine);
-                                            log.Printf("sendProxy is set");
-                                        }
 
                                         currentHostPortsMaxConnections[currentHostPort]++; // TODO: FIXME: CMPXCHG
                                         log.Printf("Current connections on port %d: %d (%d)", currentHostPort, currentHostPortsMaxConnections[currentHostPort], currentHostMaxConnections);
