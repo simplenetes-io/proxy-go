@@ -852,10 +852,10 @@ func main() {
                 } ();
 
                 signalDone := make(chan struct{});
-                var hostsConfigurationLen int = len(hostsConfiguration);
-                var hostsConfigurationCounter int = 0;
+                var hostsConfigurationLen int32 = (int32)(len(hostsConfiguration));
+                var hostsConfigurationCounter int32 = 0;
                 for ip, port := range hostsConfiguration {
-                    hostsConfigurationCounter++;
+                    atomic.AddInt32(&hostsConfigurationCounter, 1);
                     signalNext := make(chan struct{});
                     if(foundValidHost) {
                         break;
@@ -959,7 +959,10 @@ func main() {
                                             log.Printf("Error closing connection: %s. Error: %v", connection.RemoteAddr(), err);
                                         }
                                         close(signalNext);
-                                        if(hostsConfigurationCounter >= hostsConfigurationLen) {
+
+                                        var currentHostsConfigurationCounter int32;
+                                        currentHostsConfigurationCounter = atomic.LoadInt32(&hostsConfigurationCounter);
+                                        if(currentHostsConfigurationCounter >= hostsConfigurationLen) {
                                             log.Printf("No available hosts");
                                             conn.Close();
                                             close(signalDone);
