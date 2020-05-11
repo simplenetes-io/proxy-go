@@ -5,7 +5,13 @@ The cluster ports proxy goal is to listen to a range of ports, referred to as cl
 
 The local ports proxy serves to proxy traffic coming in from a single port to local ports, in sequenced order, exiting upon first success or on failure at the end of the configured sequence.
 
-### Run
+## Features
+* Round table connecting on single host
+* Proxy protocol forwarding
+* Customizable max number of connections
+* Multiple proxy ports
+
+## Run
 Serve on all local interfaces:
 ```sh
 go run src/entrypoint.go
@@ -16,7 +22,7 @@ Serve on specific host IP:
 go run src/entrypoint.go 192.168.99.100
 ```
 
-### Tests
+## Tests
 
 Run all proxy verification tests inside a container:  
 ```sh
