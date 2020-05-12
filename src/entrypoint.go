@@ -751,12 +751,159 @@ func main() {
                                 if(err == nil) {
                                     log.Printf("[host] Connected to %s", host);
 
-                                    //if(currentSendProxyFlag) {
-                                    if(true) {
-                                        var proxyLine = fmt.Sprintf("PROXY TCP4 127.0.0.1 127.0.0.1 %d %d\r\n", currentClusterPort, currentClusterPort);
-                                        log.Printf("[host] sending header line: %s", proxyLine);
-                                        fmt.Fprintf(hostConnection, proxyLine);
+                                    // Check presence of proxy protocol
+                                    var clientIp, proxyIp, clientPort, proxyPort, data = func() (string, string, int, int, []byte) {
+                                        var err error;
+                                        var connectionReader *bufio.Reader;
+                                        connectionReader = bufio.NewReader(connection);
+                                        var connectionReaderBufferCount int;
+                                        var connectionReaderBuffer []byte;
+
+                                        // TODO: FIXME: Read all in advance to not lose data ?
+                                        // TODO: FIXME: careful with big chunks of data ?
+                                        // Reading all would block:
+                                        //    data, err = ioutil.ReadAll(connectionReader);
+                                        var data []byte;
+                                        data = []byte("dummybytes");
+                                        if(err != nil) {
+                                            log.Printf("Error: %v", err);
+                                        }
+                                        log.Printf("======\nData: %v", data);
+
+                                        // Check proxy protocol header
+                                        const proxyProtocolHeaderString string = "PROXY ";
+                                        const proxyProtocolHeaderStringLen int = len(proxyProtocolHeaderString);
+                                        connectionReaderBuffer = make([]byte, proxyProtocolHeaderStringLen);
+                                        // Read initial header
+                                        connectionReaderBufferCount, err = connectionReader.Read(connectionReaderBuffer);
+                                        // Check header buffer is valid, count matches expected length and buffer match expected content
+                                        if(err != nil || connectionReaderBufferCount != proxyProtocolHeaderStringLen ||
+                                            !bytes.Equal(connectionReaderBuffer, []byte(proxyProtocolHeaderString))) {
+                                            log.Printf("Error parsing proxy protocol header prefix: %s. Error: %v", connectionReaderBuffer, err);
+                                            return "", "", 0, 0, data;
+                                        }
+
+                                        // Check case of unknown proxy protocol
+                                        const proxyProtocolUnknownString string = "UNKNOWN\r\n";
+                                        var proxyProtocolUnknownStringLen int = len(proxyProtocolUnknownString);
+                                        connectionReaderBuffer, err = connectionReader.Peek(proxyProtocolUnknownStringLen);
+                                        // Check unknwon buffer is valid and data matches expected content
+                                        if(err != nil || bytes.Equal(connectionReaderBuffer, []byte(proxyProtocolUnknownString))) {
+                                            log.Printf("Error parsing proxy protocol unknown: %v", err);
+                                            return "", "", 0, 0, data;
+                                        }
+
+                                        // Check TCP4 proxy protocol case
+                                        // Reference: "PROXY TCP4 255.255.255.255 255.255.255.255 65535 65535\r\n"
+                                        // TODO: add support to TCP6
+                                        const proxyProtocolTCP4String string = "TCP4 ";
+                                        const proxyProtocolTCP4StringLen int = len(proxyProtocolTCP4String);
+                                        connectionReaderBuffer = make([]byte, proxyProtocolTCP4StringLen);
+                                        connectionReaderBufferCount, err = connectionReader.Read(connectionReaderBuffer)
+                                        // Check buffer is valid, count matches expected length and buffer matches expected content
+                                        if(err != nil || connectionReaderBufferCount != proxyProtocolTCP4StringLen ||
+                                            !bytes.Equal(connectionReaderBuffer, []byte(proxyProtocolTCP4String))) {
+                                            log.Printf("Error parsing proxy protocol inet protocol: %s. Error: %v", connectionReaderBuffer, err);
+                                            return "", "", 0, 0, data;
+                                        }
+
+                                        // Read client IP address
+                                        var proxyProtocolClientIpString string;
+                                        proxyProtocolClientIpString, err = connectionReader.ReadString(' ');
+                                        if(err != nil) {
+                                            log.Printf("Error parsing proxy protocol client IP: %v", err);
+                                            return "", "", 0, 0, data;
+                                        }
+                                        // Adjust string
+                                        var proxyProtocolClientIpStringLen int;
+                                        proxyProtocolClientIpStringLen = len(proxyProtocolClientIpString);
+                                        proxyProtocolClientIpString = proxyProtocolClientIpString[:proxyProtocolClientIpStringLen-1];
+                                        // Parse IP
+                                        var proxyProtocolClientIp net.IP;
+                                        proxyProtocolClientIp = net.ParseIP(proxyProtocolClientIpString);
+                                        if(proxyProtocolClientIp == nil) {
+                                            log.Printf("Error parsing client IP: %s", proxyProtocolClientIpString);
+                                            return "", "", 0, 0, data;
+                                        }
+
+                                        // Read proxy IP address
+                                        var proxyProtocolProxyIpString string;
+                                        proxyProtocolProxyIpString, err = connectionReader.ReadString(' ');
+                                        if(err != nil) {
+                                            log.Printf("Error parsing proxy protocol proxy IP: %v", err);
+                                            return "", "", 0, 0, data;
+                                        }
+                                        // Adjust string
+                                        var proxyProtocolProxyIpStringLen int;
+                                        proxyProtocolProxyIpStringLen = len(proxyProtocolProxyIpString);
+                                        proxyProtocolProxyIpString = proxyProtocolProxyIpString[:proxyProtocolProxyIpStringLen-1];
+                                        // Parse IP
+                                        var proxyProtocolProxyIp net.IP;
+                                        proxyProtocolProxyIp = net.ParseIP(proxyProtocolProxyIpString);
+                                        if(proxyProtocolProxyIp == nil) {
+                                            log.Printf("Error parsing proxy IP: %s", proxyProtocolClientIpString);
+                                            return "", "", 0, 0, data;
+                                        }
+
+                                        // Read client port number
+                                        var proxyProtocolClientPortString string;
+                                        proxyProtocolClientPortString, err = connectionReader.ReadString(' ');
+                                        if(err != nil) {
+                                            log.Printf("Error parsing proxy protocol client port: %v", err);
+                                            return "", "", 0, 0, data;
+                                        }
+                                        // Adjust number
+                                        var proxyProtocolClientPortStringLen int;
+                                        proxyProtocolClientPortStringLen = len(proxyProtocolClientPortString);
+                                        proxyProtocolClientPortString = proxyProtocolClientPortString[:proxyProtocolClientPortStringLen-1];
+                                        // Parse port
+                                        var proxyProtocolClientPort int;
+                                        proxyProtocolClientPort, err = strconv.Atoi(proxyProtocolClientPortString);
+                                        if(err != nil) {
+                                            log.Printf("Error parsing proxy protocol client port: %v", err);
+                                            return "", "", 0, 0, data;
+                                        }
+
+                                        // Read proxy port number
+                                        var proxyProtocolProxyPortString string;
+                                        proxyProtocolProxyPortString, err = connectionReader.ReadString('\r');
+                                        if(err != nil) {
+                                            log.Printf("Error parsing proxy protocol proxy port: %v", err);
+                                            return "", "", 0, 0, data;
+                                        }
+                                        // Adjust number
+                                        var proxyProtocolProxyPortStringLen int;
+                                        proxyProtocolProxyPortStringLen = len(proxyProtocolProxyPortString);
+                                        proxyProtocolProxyPortString = proxyProtocolProxyPortString[:proxyProtocolProxyPortStringLen-1];
+                                        // Parse port
+                                        var proxyProtocolProxyPort int;
+                                        proxyProtocolProxyPort, err = strconv.Atoi(proxyProtocolProxyPortString);
+                                        if(err != nil) {
+                                            log.Printf("Error parsing proxy protocol proxy port: %v", err);
+                                            return "", "", 0, 0, data;
+                                        }
+
+                                        // Read trailing characters
+                                        var proxyProtocolTrailingByte byte;
+                                        proxyProtocolTrailingByte, err = connectionReader.ReadByte();
+                                        if(err != nil || proxyProtocolTrailingByte != '\n') {
+                                            log.Printf("Error parsing proxy protocol trailing byte: %v", err);
+                                            return "", "", 0, 0, data;
+                                        }
+
+                                        return proxyProtocolClientIpString, proxyProtocolProxyIpString, proxyProtocolClientPort, proxyProtocolProxyPort, data;
+                                    } ();
+
+                                    // Handle internal header communication
+                                    log.Printf("[host] Reading back proxy protocol line. inet: tcp | Remote clientip: %s, clientport %d | Proxy proxyip: %s, proxyport: %d\n", clientIp, clientPort, proxyIp, proxyPort);
+                                    var proxyLine string;
+                                    if(proxyPort == 0) {
+                                        proxyLine = fmt.Sprintf("PROXY TCP4 127.0.0.1 127.0.0.1 %d %d\r\n%s\r\n", currentClusterPort, currentClusterPort, data);
+                                    } else {
+                                        proxyLine = fmt.Sprintf("PROXY TCP4 %s %s %d %d\r\n", clientIp, proxyIp, clientPort, proxyPort);
                                     }
+                                    log.Printf("[host] sending header line: %s", proxyLine);
+                                    fmt.Fprintf(hostConnection, proxyLine);
 
                                     var isConnected int32;
                                     atomic.StoreInt32(&isConnected, 1);
