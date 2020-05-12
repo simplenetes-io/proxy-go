@@ -752,23 +752,15 @@ func main() {
                                     log.Printf("[host] Connected to %s", host);
 
                                     // Check presence of proxy protocol
+                                    var connectionReader *bufio.Reader;
                                     var clientIp, proxyIp, clientPort, proxyPort, data = func() (string, string, int, int, []byte) {
                                         var err error;
-                                        var connectionReader *bufio.Reader;
                                         connectionReader = bufio.NewReader(connection);
                                         var connectionReaderBufferCount int;
                                         var connectionReaderBuffer []byte;
 
-                                        // TODO: FIXME: Read all in advance to not lose data ?
-                                        // TODO: FIXME: careful with big chunks of data ?
-                                        // Reading all would block:
-                                        //    data, err = ioutil.ReadAll(connectionReader);
                                         var data []byte;
-                                        data = []byte("dummybytes");
-                                        if(err != nil) {
-                                            log.Printf("Error: %v", err);
-                                        }
-                                        log.Printf("======\nData: %v", data);
+                                        data = []byte("");
 
                                         // Check proxy protocol header
                                         const proxyProtocolHeaderString string = "PROXY ";
@@ -780,6 +772,7 @@ func main() {
                                         if(err != nil || connectionReaderBufferCount != proxyProtocolHeaderStringLen ||
                                             !bytes.Equal(connectionReaderBuffer, []byte(proxyProtocolHeaderString))) {
                                             log.Printf("Error parsing proxy protocol header prefix: %s. Error: %v", connectionReaderBuffer, err);
+                                            data = connectionReaderBuffer;
                                             return "", "", 0, 0, data;
                                         }
 
@@ -898,7 +891,7 @@ func main() {
                                     log.Printf("[host] Reading back proxy protocol line. inet: tcp | Remote clientip: %s, clientport %d | Proxy proxyip: %s, proxyport: %d\n", clientIp, clientPort, proxyIp, proxyPort);
                                     var proxyLine string;
                                     if(proxyPort == 0) {
-                                        proxyLine = fmt.Sprintf("PROXY TCP4 127.0.0.1 127.0.0.1 %d %d\r\n%s\r\n", currentClusterPort, currentClusterPort, data);
+                                        proxyLine = fmt.Sprintf("PROXY TCP4 127.0.0.1 127.0.0.1 %d %d\r\n%s", currentClusterPort, currentClusterPort, data);
                                     } else {
                                         proxyLine = fmt.Sprintf("PROXY TCP4 %s %s %d %d\r\n", clientIp, proxyIp, clientPort, proxyPort);
                                     }
@@ -948,7 +941,7 @@ func main() {
 
                                         var err error;
                                         log.Printf("[host] Copying to hostConnection %s and conn %s", hostConnection.RemoteAddr(), conn.RemoteAddr());
-                                        _, err = io.Copy(hostConnection, conn);
+                                        _, err = io.Copy(hostConnection, connectionReader);
                                         if(err != nil) {
                                             log.Printf("[host] Error copying data from host to cluster: %v", err);
                                             //hostConnection.Close();
@@ -1012,9 +1005,9 @@ func main() {
                 log.Printf("Handling remote connection: %s\n", connection.RemoteAddr());
 
                 // Check presence of proxy protocol
+                var connectionReader *bufio.Reader;
                 var clientIp, proxyIp, clientPort, proxyPort = func() (string, string, int, int) {
                     var err error;
-                    var connectionReader *bufio.Reader;
                     connectionReader = bufio.NewReader(connection);
                     var connectionReaderBufferCount int;
                     var connectionReaderBuffer []byte;
@@ -1239,7 +1232,7 @@ func main() {
 
                                             var err error;
                                             log.Printf("Copying to hostConnection %s and conn %s", hostConnection.RemoteAddr(), conn.RemoteAddr());
-                                            _, err = io.Copy(hostConnection, conn);
+                                            _, err = io.Copy(hostConnection, connectionReader);
                                             if(err != nil) {
                                                 log.Printf("Error copying data from host to cluster: %v", err);
                                                 hostConnection.Close();
