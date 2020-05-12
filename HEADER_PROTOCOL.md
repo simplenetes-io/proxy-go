@@ -11,4 +11,5 @@ cat rawbytes | nc 29999
   -> apply logic of stripping/prepending PP header to rawbytes.
 ```
 
-Header is required for direct connections to `32767`.
+* The internal header is required for direct connections to `32767`.
+* The PP header is the proxy protocol header which haproxy will send, but a pod will likely not send.
