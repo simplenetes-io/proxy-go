@@ -361,7 +361,7 @@ func loadHostsConfiguration(cfgFilePath string) (HostsConfigurationMap) {
             var currentEntryValues []string = strings.Split(currentEntry, ":");
             var currentEntryValuesLen int = len(currentEntryValues);
             if(currentEntryValuesLen != 2) {
-                log.Printf("Error while reading configuration line: %s. Expected format: clusterPort:hostPort:maxConnections:sendProxyFlag. Values: %s. Length: %d", currentEntry, currentEntryValues, currentEntryValuesLen);
+                log.Printf("Error while reading configuration line: %s. Expected format: ip:port. Values: %s. Length: %d", currentEntry, currentEntryValues,  currentEntryValuesLen);
                 os.Exit(1);
             } else {
                 log.Printf("Parsing configuration entry: %s\n", currentEntry);
