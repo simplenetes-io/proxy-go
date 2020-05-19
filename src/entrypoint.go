@@ -43,6 +43,43 @@ type ProgramSettings struct {
 type PortsConfigurationMap map[int][]PortsConfigurationData;
 type HostsConfigurationMap map[string]int;
 
+type ClientWriter struct {
+    io.Writer
+}
+
+type SignalReader struct {
+    io.Reader
+}
+
+func (writer ClientWriter) Write(data []byte) (int, error) {
+    if(strings.Contains(string(data), "go away") || strings.Contains(string(data), "go ahead")) {
+        return len(string(data)), nil;
+    } else {
+        n, err := writer.Writer.Write(data);
+        fmt.Printf("wrote %d bytes\n", n);
+        return n, err;
+    }
+}
+
+var foundValidHost int32;
+func (reader SignalReader) Read(dst []byte) (int, error) {
+//    emptySet := make([]byte, 32768)
+    n, err := reader.Reader.Read(dst);
+    if(err == io.EOF) {
+        fmt.Printf("EOF\n");
+    } else {
+        fmt.Printf("read %d bytes: %v\n", n, string(dst));
+//        if(strings.Contains(string(dst), "go away") || bytes.Contains(emptySet, dst)) {
+        if(strings.Contains(string(dst), "go away")) {
+            fmt.Printf("Not a valid host: %v. Skipping...\n", string(dst));
+        } else {
+            fmt.Printf("Making as valid host: %v (%d)\n", string(dst), len(string(dst)));
+            atomic.StoreInt32(&foundValidHost, 1);
+        }
+    }
+    fmt.Printf("done\n");
+    return n, err;
+}
 
 /*============================
  loadConfiguration
@@ -717,39 +754,14 @@ func main() {
                 // Iterate over list of hosts
                 // TODO: handle one at a time iteration
                 //         -> procedures can only be started the previous one signals with OK or FAILURE
-                var foundValidHost bool = false;
 
+                atomic.StoreInt32(&foundValidHost, 0);
                 signalDone := make(chan struct{});
+                var signalDoneMutex int32 = 0;
                 var hostsConfigurationLen int32 = (int32)(len(hostsConfiguration));
                 var hostsConfigurationCounter int32 = 0;
-                for ip, port := range hostsConfiguration {
-                    atomic.AddInt32(&hostsConfigurationCounter, 1);
-                    signalNext := make(chan struct{});
-                    if(foundValidHost) {
-                        break;
-                    }
-                    log.Printf("[host] Trying to connect to host: %s:%d", ip, port);
-                    // Transform: forward connection to handler
-                    go func(conn net.Conn, currentClusterPort int) {
-                        log.Printf("[host] Handling remote connection: %s\n", connection.RemoteAddr());
-
-                        // Pass the connection to handler
-                        if(connection != nil) {
-                            go func(mode string, address string, conn net.Conn) {
-                                var hostConnection net.Conn;
-                                var err error;
-
-                                // Try to connect to host
-                                var currentHostPort = port;
-                                var host = address + ":" + strconv.Itoa(currentHostPort);
-
-                                // TODO: FIXME: expose timeout
-                                var hostConnectionTimeout time.Duration;
-                                // TODO: FIXME: error checking
-                                hostConnectionTimeout, _ = time.ParseDuration("1s");
-                                hostConnection, err = net.DialTimeout(mode, host, hostConnectionTimeout);
-                                if(err == nil) {
-                                    log.Printf("[host] Connected to %s", host);
+                signalNext := make(chan struct{});
+                var signalNextMutex int32 = 0;
 
                                     // Check presence of proxy protocol
                                     var connectionReader *bufio.Reader;
@@ -887,6 +899,36 @@ func main() {
                                         return proxyProtocolClientIpString, proxyProtocolProxyIpString, proxyProtocolClientPort, proxyProtocolProxyPort, data;
                                     } ();
 
+
+                log.Printf("Iterating over hosts configuration: %v", hostsConfiguration);
+                for ip, port := range hostsConfiguration {
+                    atomic.AddInt32(&hostsConfigurationCounter, 1);
+                    if(atomic.LoadInt32(&foundValidHost) == 1) {
+                        break;
+                    }
+                    log.Printf("[host] Trying to connect to host: %s:%d", ip, port);
+                    // Transform: forward connection to handler
+                    go func(conn net.Conn, currentClusterPort int) {
+                        log.Printf("[host] Handling remote connection: %s\n", connection.RemoteAddr());
+
+                        // Pass the connection to handler
+                        if(connection != nil) {
+                            go func(mode string, address string, conn net.Conn) {
+                                var hostConnection net.Conn;
+                                var err error;
+
+                                // Try to connect to host
+                                var currentHostPort = port;
+                                var host = address + ":" + strconv.Itoa(currentHostPort);
+
+                                // TODO: FIXME: expose timeout
+                                var hostConnectionTimeout time.Duration;
+                                // TODO: FIXME: error checking
+                                hostConnectionTimeout, _ = time.ParseDuration("1s");
+                                hostConnection, err = net.DialTimeout(mode, host, hostConnectionTimeout);
+                                if(err == nil) {
+                                    log.Printf("[host] Connected to %s", host);
+
                                     // Handle internal header communication
                                     log.Printf("[host] Reading back proxy protocol line. inet: tcp | Remote clientip: %s, clientport %d | Proxy proxyip: %s, proxyport: %d\n", clientIp, clientPort, proxyIp, proxyPort);
                                     var proxyLine string;
@@ -901,7 +943,6 @@ func main() {
                                     var isConnected int32;
                                     atomic.StoreInt32(&isConnected, 1);
 
-                                    foundValidHost = true; // TODO: FIXME: atomic
 
                                     // Input: Send data from received connection to host
                                     go func() {
@@ -910,18 +951,31 @@ func main() {
                                             if(atomic.LoadInt32(&isConnected) == 1) {
                                                 atomic.StoreInt32(&isConnected, 0);
                                                 hostConnection.Close();
-                                                conn.Close();
-                                                close(signalNext);
-                                                close(signalDone);
+                                                //conn.Close();
+                                                if(atomic.LoadInt32(&signalNextMutex) == 0) {
+                                                    atomic.StoreInt32(&signalNextMutex, 1);
+                                                    close(signalNext);
+                                                }
+log.Printf("[host] SIGNALLED");
+                                                if(atomic.LoadInt32(&signalDoneMutex) == 0) {
+                                                    atomic.StoreInt32(&signalDoneMutex, 1);
+                                                    close(signalDone);
+                                                }
                                             }
                                         } ();
 
                                         var err error;
-                                        _, err = io.Copy(conn, hostConnection);
+                                        clientConnectionWriter := ClientWriter{conn};
+                                        signalConnectionReader := SignalReader{hostConnection};
+                                        _, err = io.Copy(clientConnectionWriter, signalConnectionReader);
                                         if(err != nil) {
                                             log.Printf("[host] Error copying data from cluster to host: %v", err);
                                             //hostConnection.Close();
-                                            //close(signalDone);
+                                                if(atomic.LoadInt32(&signalDoneMutex) == 0) {
+                                                    atomic.StoreInt32(&signalDoneMutex, 1);
+                                                    close(signalDone);
+                                                }
+
                                             return;
                                         }
                                     }();
@@ -933,19 +987,32 @@ func main() {
                                             if(atomic.LoadInt32(&isConnected) == 1) {
                                                 atomic.StoreInt32(&isConnected, 0);
                                                 hostConnection.Close();
-                                                conn.Close();
-                                                close(signalNext);
-                                                close(signalDone);
+                                                //conn.Close();
+                                                if(atomic.LoadInt32(&signalNextMutex) == 0) {
+                                                    atomic.StoreInt32(&signalNextMutex, 1);
+                                                    close(signalNext);
+                                                }
+
+                                                if(atomic.LoadInt32(&signalDoneMutex) == 0) {
+                                                    atomic.StoreInt32(&signalDoneMutex, 1);
+                                                    close(signalDone);
+                                                }
                                             }
                                         } ();
 
                                         var err error;
+
+
                                         log.Printf("[host] Copying to hostConnection %s and conn %s", hostConnection.RemoteAddr(), conn.RemoteAddr());
                                         _, err = io.Copy(hostConnection, connectionReader);
                                         if(err != nil) {
                                             log.Printf("[host] Error copying data from host to cluster: %v", err);
                                             //hostConnection.Close();
-                                            //close(signalDone);
+                                            if(atomic.LoadInt32(&signalDoneMutex) == 0) {
+                                                atomic.StoreInt32(&signalDoneMutex, 1);
+                                                close(signalDone);
+                                            }
+
                                             return;
                                         }
                                     }();
@@ -955,14 +1022,20 @@ func main() {
                                     if(err != nil) {
                                         log.Printf("Error closing connection: %s. Error: %v", connection.RemoteAddr(), err);
                                     }
-                                    close(signalNext);
+                                    if(atomic.LoadInt32(&signalNextMutex) == 0) {
+                                        atomic.StoreInt32(&signalNextMutex, 1);
+                                        close(signalNext);
+                                    }
 
                                     var currentHostsConfigurationCounter int32;
                                     currentHostsConfigurationCounter = atomic.LoadInt32(&hostsConfigurationCounter);
                                     if(currentHostsConfigurationCounter >= hostsConfigurationLen) {
                                         log.Printf("No available hosts");
                                         conn.Close();
-                                        close(signalDone);
+                                        if(atomic.LoadInt32(&signalDoneMutex) == 0) {
+                                            atomic.StoreInt32(&signalDoneMutex, 1);
+                                            close(signalDone);
+                                        }
                                     }
                                     return;
                                 }
@@ -973,13 +1046,20 @@ func main() {
                             if(err != nil) {
                                 log.Printf("[host] Error closing connection: %s. Error: %v", connection.RemoteAddr(), err);
                             }
-                            close(signalNext);
+                            if(atomic.LoadInt32(&signalNextMutex) == 0) {
+                                atomic.StoreInt32(&signalNextMutex, 1);
+                                close(signalNext);
+                            }
                             return;
                         }
                     } (connection, currentClusterPort);
+                    log.Printf("[host] Waiting on signal next. Current host: %v, %v", ip, port);
                     <-signalNext;
+                    log.Printf("[host] Proceeding to the next host");
                 }
+                log.Printf("[host] Waiting on signal done");
                 <-signalDone;
+                log.Printf("[host] Exhausted all hosts");
             }
         } (listener, clusterPort);
     }
