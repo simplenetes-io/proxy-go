@@ -71,7 +71,7 @@ func (reader SignalReader) Read(dst []byte) (int, error) {
         fmt.Printf("read %d bytes: %v\n", n, string(dst));
 //        if(strings.Contains(string(dst), "go away") || bytes.Contains(emptySet, dst)) {
         if(strings.Contains(string(dst), "go away")) {
-            fmt.Printf("Not a valid host: %v. Skipping...\n", string(dst));
+            return 0, fmt.Errorf("Not a valid host: %v. Skipping...\n", string(dst));
         } else {
             fmt.Printf("Making as valid host: %v (%d)\n", string(dst), len(string(dst)));
             atomic.StoreInt32(&foundValidHost, 1);
@@ -745,10 +745,10 @@ func main() {
                 var err error;
                 connection, err = listener.Accept();
                 if(err != nil) {
-                    log.Printf("Error accepting connection: %v", err);
+                    log.Printf("[host] Error accepting connection: %v", err);
                     return;
                 } else {
-                    log.Printf("Accepted connection from %s (via %s)", connection.LocalAddr(), connection.RemoteAddr());
+                    log.Printf("[host] Accepted connection from %s (via %s)", connection.LocalAddr(), connection.RemoteAddr());
                 }
 
                 // Iterate over list of hosts
@@ -760,9 +760,7 @@ func main() {
                 var signalDoneMutex int32 = 0;
                 var hostsConfigurationLen int32 = (int32)(len(hostsConfiguration));
                 var hostsConfigurationCounter int32 = 0;
-                signalNext := make(chan struct{});
                 var signalNextMutex int32 = 0;
-
                 // Check presence of proxy protocol
                 var connectionReader *bufio.Reader;
                 var clientIp, proxyIp, clientPort, proxyPort, data = func() (string, string, int, int, []byte) {
@@ -899,8 +897,12 @@ func main() {
                     return proxyProtocolClientIpString, proxyProtocolProxyIpString, proxyProtocolClientPort, proxyProtocolProxyPort, data;
                 } ();
 
-                log.Printf("Iterating over hosts configuration: %v", hostsConfiguration);
+                log.Printf("[host] Iterating over hosts configuration: %v", hostsConfiguration);
                 for ip, port := range hostsConfiguration {
+                    signalNext := make(chan struct{});
+                    atomic.StoreInt32(&signalNextMutex, 0);
+
+
                     atomic.AddInt32(&hostsConfigurationCounter, 1);
                     if(atomic.LoadInt32(&foundValidHost) == 1) {
                         break;
@@ -950,15 +952,18 @@ func main() {
                                     log.Printf("[host] Closing input host connection...");
                                     if(atomic.LoadInt32(&isConnected) == 1) {
                                         atomic.StoreInt32(&isConnected, 0);
-                                        hostConnection.Close();
+                                        log.Printf("[host] Closing host connection: %s", hostConnection.RemoteAddr());
+                                        //hostConnection.Close();
                                         //conn.Close();
                                         if(atomic.LoadInt32(&signalNextMutex) == 0) {
                                             atomic.StoreInt32(&signalNextMutex, 1);
+                                            log.Printf("[host] SIGNAL: next entry");
                                             close(signalNext);
                                         }
 
                                         if(atomic.LoadInt32(&signalDoneMutex) == 0) {
                                             atomic.StoreInt32(&signalDoneMutex, 1);
+                                            log.Printf("[host] SIGNAL: hosts loop is done");
                                             close(signalDone);
                                         }
                                     }
@@ -986,15 +991,18 @@ func main() {
                                     log.Printf("[host] Closing output host connection...");
                                     if(atomic.LoadInt32(&isConnected) == 1) {
                                         atomic.StoreInt32(&isConnected, 0);
-                                        hostConnection.Close();
+                                        log.Printf("[host] Closing host connection: %s", hostConnection.RemoteAddr());
+                                        //hostConnection.Close();
                                         //conn.Close();
                                         if(atomic.LoadInt32(&signalNextMutex) == 0) {
                                             atomic.StoreInt32(&signalNextMutex, 1);
+                                            log.Printf("[host] SIGNAL: next entry");
                                             close(signalNext);
                                         }
 
                                         if(atomic.LoadInt32(&signalDoneMutex) == 0) {
                                             atomic.StoreInt32(&signalDoneMutex, 1);
+                                            log.Printf("[host] SIGNAL: hosts loop is done");
                                             close(signalDone);
                                         }
                                     }
@@ -1035,6 +1043,7 @@ func main() {
                                 conn.Close();
                                 if(atomic.LoadInt32(&signalDoneMutex) == 0) {
                                     atomic.StoreInt32(&signalDoneMutex, 1);
+                                    log.Printf("[host] SIGNAL: hosts loop is done");
                                     close(signalDone);
                                 }
                             }
@@ -1047,6 +1056,7 @@ func main() {
                         }
                         if(atomic.LoadInt32(&signalNextMutex) == 0) {
                             atomic.StoreInt32(&signalNextMutex, 1);
+                            log.Printf("[host] SIGNAL: next entry");
                             close(signalNext);
                         }
                         return;
@@ -1253,6 +1263,7 @@ func main() {
                                         log.Printf("Error connecting to %s in mode %s. Reached maximum number of active connections (%d)", host, mode, currentHostMaxConnections);
                                         if(hostPortsIndex == (hostPortsLen-1)) {
                                             fmt.Fprintf(connection, responseMappingInactive);
+                                            log.Printf("Closing connection: %s", connection.RemoteAddr());
                                             err = connection.Close();
                                             if(err != nil) {
                                                 log.Printf("Error closing connection: %s. Error: %v", connection.RemoteAddr(), err);
@@ -1326,6 +1337,7 @@ func main() {
                                         log.Printf("Error connecting to %s in mode %s. Message: %v", host, mode, err);
                                         if(attempts >= hostPortsLen) {
                                             fmt.Fprintf(connection, responseMappingInactive);
+                                            log.Printf("Closing connection: %s", connection.RemoteAddr());
                                             err = connection.Close();
                                             if(err != nil) {
                                                 log.Printf("Error closing connection: %s. Error: %v", connection.RemoteAddr(), err);
@@ -1345,6 +1357,7 @@ func main() {
                         }
                     } else {
                         fmt.Fprintf(connection, responseMappingInactive);
+                        log.Printf("Closing connection: %s", connection.RemoteAddr());
                         err = connection.Close();
                         if(err != nil) {
                             log.Printf("Error closing connection: %s. Error: %v", connection.RemoteAddr(), err);
