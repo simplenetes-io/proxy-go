@@ -957,14 +957,9 @@ func main() {
                                             close(signalNext);
                                         }
 
-                                        var currentHostsConfigurationCounter int32;
-                                        currentHostsConfigurationCounter = atomic.LoadInt32(&hostsConfigurationCounter);
-                                        if(currentHostsConfigurationCounter >= hostsConfigurationLen) {
-
-                                            if(atomic.LoadInt32(&signalDoneMutex) == 0) {
-                                                atomic.StoreInt32(&signalDoneMutex, 1);
-                                                close(signalDone);
-                                            }
+                                        if(atomic.LoadInt32(&signalDoneMutex) == 0) {
+                                            atomic.StoreInt32(&signalDoneMutex, 1);
+                                            close(signalDone);
                                         }
                                     }
                                 } ();
@@ -998,14 +993,9 @@ func main() {
                                             close(signalNext);
                                         }
 
-                                        var currentHostsConfigurationCounter int32;
-                                        currentHostsConfigurationCounter = atomic.LoadInt32(&hostsConfigurationCounter);
-                                        if(currentHostsConfigurationCounter >= hostsConfigurationLen) {
-
-                                            if(atomic.LoadInt32(&signalDoneMutex) == 0) {
-                                                atomic.StoreInt32(&signalDoneMutex, 1);
-                                                close(signalDone);
-                                            }
+                                        if(atomic.LoadInt32(&signalDoneMutex) == 0) {
+                                            atomic.StoreInt32(&signalDoneMutex, 1);
+                                            close(signalDone);
                                         }
                                     }
                                 } ();
