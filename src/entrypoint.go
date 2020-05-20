@@ -763,142 +763,141 @@ func main() {
                 signalNext := make(chan struct{});
                 var signalNextMutex int32 = 0;
 
-                                    // Check presence of proxy protocol
-                                    var connectionReader *bufio.Reader;
-                                    var clientIp, proxyIp, clientPort, proxyPort, data = func() (string, string, int, int, []byte) {
-                                        var err error;
-                                        connectionReader = bufio.NewReader(connection);
-                                        var connectionReaderBufferCount int;
-                                        var connectionReaderBuffer []byte;
+                // Check presence of proxy protocol
+                var connectionReader *bufio.Reader;
+                var clientIp, proxyIp, clientPort, proxyPort, data = func() (string, string, int, int, []byte) {
+                    var err error;
+                    connectionReader = bufio.NewReader(connection);
+                    var connectionReaderBufferCount int;
+                    var connectionReaderBuffer []byte;
 
-                                        var data []byte;
-                                        data = []byte("");
+                    var data []byte;
+                    data = []byte("");
 
-                                        // Check proxy protocol header
-                                        const proxyProtocolHeaderString string = "PROXY ";
-                                        const proxyProtocolHeaderStringLen int = len(proxyProtocolHeaderString);
-                                        connectionReaderBuffer = make([]byte, proxyProtocolHeaderStringLen);
-                                        // Read initial header
-                                        connectionReaderBufferCount, err = connectionReader.Read(connectionReaderBuffer);
-                                        // Check header buffer is valid, count matches expected length and buffer match expected content
-                                        if(err != nil || connectionReaderBufferCount != proxyProtocolHeaderStringLen ||
-                                            !bytes.Equal(connectionReaderBuffer, []byte(proxyProtocolHeaderString))) {
-                                            log.Printf("Error parsing proxy protocol header prefix: %s. Error: %v", connectionReaderBuffer, err);
-                                            data = connectionReaderBuffer;
-                                            return "", "", 0, 0, data;
-                                        }
+                    // Check proxy protocol header
+                    const proxyProtocolHeaderString string = "PROXY ";
+                    const proxyProtocolHeaderStringLen int = len(proxyProtocolHeaderString);
+                    connectionReaderBuffer = make([]byte, proxyProtocolHeaderStringLen);
+                    // Read initial header
+                    connectionReaderBufferCount, err = connectionReader.Read(connectionReaderBuffer);
+                    // Check header buffer is valid, count matches expected length and buffer match expected content
+                    if(err != nil || connectionReaderBufferCount != proxyProtocolHeaderStringLen ||
+                            !bytes.Equal(connectionReaderBuffer, []byte(proxyProtocolHeaderString))) {
+                        log.Printf("Error parsing proxy protocol header prefix: %s. Error: %v", connectionReaderBuffer, err);
+                        data = connectionReaderBuffer;
+                        return "", "", 0, 0, data;
+                    }
 
-                                        // Check case of unknown proxy protocol
-                                        const proxyProtocolUnknownString string = "UNKNOWN\r\n";
-                                        var proxyProtocolUnknownStringLen int = len(proxyProtocolUnknownString);
-                                        connectionReaderBuffer, err = connectionReader.Peek(proxyProtocolUnknownStringLen);
-                                        // Check unknwon buffer is valid and data matches expected content
-                                        if(err != nil || bytes.Equal(connectionReaderBuffer, []byte(proxyProtocolUnknownString))) {
-                                            log.Printf("Error parsing proxy protocol unknown: %v", err);
-                                            return "", "", 0, 0, data;
-                                        }
+                    // Check case of unknown proxy protocol
+                    const proxyProtocolUnknownString string = "UNKNOWN\r\n";
+                    var proxyProtocolUnknownStringLen int = len(proxyProtocolUnknownString);
+                    connectionReaderBuffer, err = connectionReader.Peek(proxyProtocolUnknownStringLen);
+                    // Check unknwon buffer is valid and data matches expected content
+                    if(err != nil || bytes.Equal(connectionReaderBuffer, []byte(proxyProtocolUnknownString))) {
+                        log.Printf("Error parsing proxy protocol unknown: %v", err);
+                        return "", "", 0, 0, data;
+                    }
 
-                                        // Check TCP4 proxy protocol case
-                                        // Reference: "PROXY TCP4 255.255.255.255 255.255.255.255 65535 65535\r\n"
-                                        // TODO: add support to TCP6
-                                        const proxyProtocolTCP4String string = "TCP4 ";
-                                        const proxyProtocolTCP4StringLen int = len(proxyProtocolTCP4String);
-                                        connectionReaderBuffer = make([]byte, proxyProtocolTCP4StringLen);
-                                        connectionReaderBufferCount, err = connectionReader.Read(connectionReaderBuffer)
-                                        // Check buffer is valid, count matches expected length and buffer matches expected content
-                                        if(err != nil || connectionReaderBufferCount != proxyProtocolTCP4StringLen ||
-                                            !bytes.Equal(connectionReaderBuffer, []byte(proxyProtocolTCP4String))) {
-                                            log.Printf("Error parsing proxy protocol inet protocol: %s. Error: %v", connectionReaderBuffer, err);
-                                            return "", "", 0, 0, data;
-                                        }
+                    // Check TCP4 proxy protocol case
+                    // Reference: "PROXY TCP4 255.255.255.255 255.255.255.255 65535 65535\r\n"
+                    // TODO: add support to TCP6
+                    const proxyProtocolTCP4String string = "TCP4 ";
+                    const proxyProtocolTCP4StringLen int = len(proxyProtocolTCP4String);
+                    connectionReaderBuffer = make([]byte, proxyProtocolTCP4StringLen);
+                    connectionReaderBufferCount, err = connectionReader.Read(connectionReaderBuffer)
+                        // Check buffer is valid, count matches expected length and buffer matches expected content
+                        if(err != nil || connectionReaderBufferCount != proxyProtocolTCP4StringLen ||
+                                !bytes.Equal(connectionReaderBuffer, []byte(proxyProtocolTCP4String))) {
+                            log.Printf("Error parsing proxy protocol inet protocol: %s. Error: %v", connectionReaderBuffer, err);
+                            return "", "", 0, 0, data;
+                        }
 
-                                        // Read client IP address
-                                        var proxyProtocolClientIpString string;
-                                        proxyProtocolClientIpString, err = connectionReader.ReadString(' ');
-                                        if(err != nil) {
-                                            log.Printf("Error parsing proxy protocol client IP: %v", err);
-                                            return "", "", 0, 0, data;
-                                        }
-                                        // Adjust string
-                                        var proxyProtocolClientIpStringLen int;
-                                        proxyProtocolClientIpStringLen = len(proxyProtocolClientIpString);
-                                        proxyProtocolClientIpString = proxyProtocolClientIpString[:proxyProtocolClientIpStringLen-1];
-                                        // Parse IP
-                                        var proxyProtocolClientIp net.IP;
-                                        proxyProtocolClientIp = net.ParseIP(proxyProtocolClientIpString);
-                                        if(proxyProtocolClientIp == nil) {
-                                            log.Printf("Error parsing client IP: %s", proxyProtocolClientIpString);
-                                            return "", "", 0, 0, data;
-                                        }
+                    // Read client IP address
+                    var proxyProtocolClientIpString string;
+                    proxyProtocolClientIpString, err = connectionReader.ReadString(' ');
+                    if(err != nil) {
+                        log.Printf("Error parsing proxy protocol client IP: %v", err);
+                        return "", "", 0, 0, data;
+                    }
+                    // Adjust string
+                    var proxyProtocolClientIpStringLen int;
+                    proxyProtocolClientIpStringLen = len(proxyProtocolClientIpString);
+                    proxyProtocolClientIpString = proxyProtocolClientIpString[:proxyProtocolClientIpStringLen-1];
+                    // Parse IP
+                    var proxyProtocolClientIp net.IP;
+                    proxyProtocolClientIp = net.ParseIP(proxyProtocolClientIpString);
+                    if(proxyProtocolClientIp == nil) {
+                        log.Printf("Error parsing client IP: %s", proxyProtocolClientIpString);
+                        return "", "", 0, 0, data;
+                    }
 
-                                        // Read proxy IP address
-                                        var proxyProtocolProxyIpString string;
-                                        proxyProtocolProxyIpString, err = connectionReader.ReadString(' ');
-                                        if(err != nil) {
-                                            log.Printf("Error parsing proxy protocol proxy IP: %v", err);
-                                            return "", "", 0, 0, data;
-                                        }
-                                        // Adjust string
-                                        var proxyProtocolProxyIpStringLen int;
-                                        proxyProtocolProxyIpStringLen = len(proxyProtocolProxyIpString);
-                                        proxyProtocolProxyIpString = proxyProtocolProxyIpString[:proxyProtocolProxyIpStringLen-1];
-                                        // Parse IP
-                                        var proxyProtocolProxyIp net.IP;
-                                        proxyProtocolProxyIp = net.ParseIP(proxyProtocolProxyIpString);
-                                        if(proxyProtocolProxyIp == nil) {
-                                            log.Printf("Error parsing proxy IP: %s", proxyProtocolClientIpString);
-                                            return "", "", 0, 0, data;
-                                        }
+                    // Read proxy IP address
+                    var proxyProtocolProxyIpString string;
+                    proxyProtocolProxyIpString, err = connectionReader.ReadString(' ');
+                    if(err != nil) {
+                        log.Printf("Error parsing proxy protocol proxy IP: %v", err);
+                        return "", "", 0, 0, data;
+                    }
+                    // Adjust string
+                    var proxyProtocolProxyIpStringLen int;
+                    proxyProtocolProxyIpStringLen = len(proxyProtocolProxyIpString);
+                    proxyProtocolProxyIpString = proxyProtocolProxyIpString[:proxyProtocolProxyIpStringLen-1];
+                    // Parse IP
+                    var proxyProtocolProxyIp net.IP;
+                    proxyProtocolProxyIp = net.ParseIP(proxyProtocolProxyIpString);
+                    if(proxyProtocolProxyIp == nil) {
+                        log.Printf("Error parsing proxy IP: %s", proxyProtocolClientIpString);
+                        return "", "", 0, 0, data;
+                    }
 
-                                        // Read client port number
-                                        var proxyProtocolClientPortString string;
-                                        proxyProtocolClientPortString, err = connectionReader.ReadString(' ');
-                                        if(err != nil) {
-                                            log.Printf("Error parsing proxy protocol client port: %v", err);
-                                            return "", "", 0, 0, data;
-                                        }
-                                        // Adjust number
-                                        var proxyProtocolClientPortStringLen int;
-                                        proxyProtocolClientPortStringLen = len(proxyProtocolClientPortString);
-                                        proxyProtocolClientPortString = proxyProtocolClientPortString[:proxyProtocolClientPortStringLen-1];
-                                        // Parse port
-                                        var proxyProtocolClientPort int;
-                                        proxyProtocolClientPort, err = strconv.Atoi(proxyProtocolClientPortString);
-                                        if(err != nil) {
-                                            log.Printf("Error parsing proxy protocol client port: %v", err);
-                                            return "", "", 0, 0, data;
-                                        }
+                    // Read client port number
+                    var proxyProtocolClientPortString string;
+                    proxyProtocolClientPortString, err = connectionReader.ReadString(' ');
+                    if(err != nil) {
+                        log.Printf("Error parsing proxy protocol client port: %v", err);
+                        return "", "", 0, 0, data;
+                    }
+                    // Adjust number
+                    var proxyProtocolClientPortStringLen int;
+                    proxyProtocolClientPortStringLen = len(proxyProtocolClientPortString);
+                    proxyProtocolClientPortString = proxyProtocolClientPortString[:proxyProtocolClientPortStringLen-1];
+                    // Parse port
+                    var proxyProtocolClientPort int;
+                    proxyProtocolClientPort, err = strconv.Atoi(proxyProtocolClientPortString);
+                    if(err != nil) {
+                        log.Printf("Error parsing proxy protocol client port: %v", err);
+                        return "", "", 0, 0, data;
+                    }
 
-                                        // Read proxy port number
-                                        var proxyProtocolProxyPortString string;
-                                        proxyProtocolProxyPortString, err = connectionReader.ReadString('\r');
-                                        if(err != nil) {
-                                            log.Printf("Error parsing proxy protocol proxy port: %v", err);
-                                            return "", "", 0, 0, data;
-                                        }
-                                        // Adjust number
-                                        var proxyProtocolProxyPortStringLen int;
-                                        proxyProtocolProxyPortStringLen = len(proxyProtocolProxyPortString);
-                                        proxyProtocolProxyPortString = proxyProtocolProxyPortString[:proxyProtocolProxyPortStringLen-1];
-                                        // Parse port
-                                        var proxyProtocolProxyPort int;
-                                        proxyProtocolProxyPort, err = strconv.Atoi(proxyProtocolProxyPortString);
-                                        if(err != nil) {
-                                            log.Printf("Error parsing proxy protocol proxy port: %v", err);
-                                            return "", "", 0, 0, data;
-                                        }
+                    // Read proxy port number
+                    var proxyProtocolProxyPortString string;
+                    proxyProtocolProxyPortString, err = connectionReader.ReadString('\r');
+                    if(err != nil) {
+                        log.Printf("Error parsing proxy protocol proxy port: %v", err);
+                        return "", "", 0, 0, data;
+                    }
+                    // Adjust number
+                    var proxyProtocolProxyPortStringLen int;
+                    proxyProtocolProxyPortStringLen = len(proxyProtocolProxyPortString);
+                    proxyProtocolProxyPortString = proxyProtocolProxyPortString[:proxyProtocolProxyPortStringLen-1];
+                    // Parse port
+                    var proxyProtocolProxyPort int;
+                    proxyProtocolProxyPort, err = strconv.Atoi(proxyProtocolProxyPortString);
+                    if(err != nil) {
+                        log.Printf("Error parsing proxy protocol proxy port: %v", err);
+                        return "", "", 0, 0, data;
+                    }
 
-                                        // Read trailing characters
-                                        var proxyProtocolTrailingByte byte;
-                                        proxyProtocolTrailingByte, err = connectionReader.ReadByte();
-                                        if(err != nil || proxyProtocolTrailingByte != '\n') {
-                                            log.Printf("Error parsing proxy protocol trailing byte: %v", err);
-                                            return "", "", 0, 0, data;
-                                        }
+                    // Read trailing characters
+                    var proxyProtocolTrailingByte byte;
+                    proxyProtocolTrailingByte, err = connectionReader.ReadByte();
+                    if(err != nil || proxyProtocolTrailingByte != '\n') {
+                        log.Printf("Error parsing proxy protocol trailing byte: %v", err);
+                        return "", "", 0, 0, data;
+                    }
 
-                                        return proxyProtocolClientIpString, proxyProtocolProxyIpString, proxyProtocolClientPort, proxyProtocolProxyPort, data;
-                                    } ();
-
+                    return proxyProtocolClientIpString, proxyProtocolProxyIpString, proxyProtocolClientPort, proxyProtocolProxyPort, data;
+                } ();
 
                 log.Printf("Iterating over hosts configuration: %v", hostsConfiguration);
                 for ip, port := range hostsConfiguration {
@@ -908,151 +907,160 @@ func main() {
                     }
                     log.Printf("[host] Trying to connect to host: %s:%d", ip, port);
                     // Transform: forward connection to handler
-                    go func(conn net.Conn, currentClusterPort int) {
-                        log.Printf("[host] Handling remote connection: %s\n", connection.RemoteAddr());
+                    conn := connection;
+                    mode:= networkMode;
+                    address:= ip;
+                    log.Printf("[host] Handling remote connection: %s\n", connection.RemoteAddr());
 
-                        // Pass the connection to handler
-                        if(connection != nil) {
-                            go func(mode string, address string, conn net.Conn) {
-                                var hostConnection net.Conn;
-                                var err error;
+                    // Pass the connection to handler
+                    if(connection != nil) {
+                        var hostConnection net.Conn;
+                        var err error;
 
-                                // Try to connect to host
-                                var currentHostPort = port;
-                                var host = address + ":" + strconv.Itoa(currentHostPort);
+                        // Try to connect to host
+                        var currentHostPort = port;
+                        var host = address + ":" + strconv.Itoa(currentHostPort);
 
-                                // TODO: FIXME: expose timeout
-                                var hostConnectionTimeout time.Duration;
-                                // TODO: FIXME: error checking
-                                hostConnectionTimeout, _ = time.ParseDuration("1s");
-                                hostConnection, err = net.DialTimeout(mode, host, hostConnectionTimeout);
-                                if(err == nil) {
-                                    log.Printf("[host] Connected to %s", host);
+                        // TODO: FIXME: expose timeout
+                        var hostConnectionTimeout time.Duration;
+                        // TODO: FIXME: error checking
+                        hostConnectionTimeout, _ = time.ParseDuration("1s");
+                        hostConnection, err = net.DialTimeout(mode, host, hostConnectionTimeout);
+                        if(err == nil) {
+                            log.Printf("[host] Connected to %s", host);
 
-                                    // Handle internal header communication
-                                    log.Printf("[host] Reading back proxy protocol line. inet: tcp | Remote clientip: %s, clientport %d | Proxy proxyip: %s, proxyport: %d\n", clientIp, clientPort, proxyIp, proxyPort);
-                                    var proxyLine string;
-                                    if(proxyPort == 0) {
-                                        proxyLine = fmt.Sprintf("PROXY TCP4 127.0.0.1 127.0.0.1 %d %d\r\n%s", currentClusterPort, currentClusterPort, data);
-                                    } else {
-                                        proxyLine = fmt.Sprintf("PROXY TCP4 %s %s %d %d\r\n", clientIp, proxyIp, clientPort, proxyPort);
-                                    }
-                                    log.Printf("[host] sending header line: %s", proxyLine);
-                                    fmt.Fprintf(hostConnection, proxyLine);
+                            // Handle internal header communication
+                            log.Printf("[host] Reading back proxy protocol line. inet: tcp | Remote clientip: %s, clientport %d | Proxy proxyip: %s, proxyport: %d\n", clientIp, clientPort, proxyIp, proxyPort);
+                            var proxyLine string;
+                            if(proxyPort == 0) {
+                                proxyLine = fmt.Sprintf("PROXY TCP4 127.0.0.1 127.0.0.1 %d %d\r\n%s", currentClusterPort, currentClusterPort, data);
+                            } else {
+                                proxyLine = fmt.Sprintf("PROXY TCP4 %s %s %d %d\r\n", clientIp, proxyIp, clientPort, proxyPort);
+                            }
+                            log.Printf("[host] sending header line: %s", proxyLine);
+                            fmt.Fprintf(hostConnection, proxyLine);
 
-                                    var isConnected int32;
-                                    atomic.StoreInt32(&isConnected, 1);
+                            var isConnected int32;
+                            atomic.StoreInt32(&isConnected, 1);
 
 
-                                    // Input: Send data from received connection to host
-                                    go func() {
-                                        defer func() {
-                                            log.Printf("[host] Closing input host connection...");
-                                            if(atomic.LoadInt32(&isConnected) == 1) {
-                                                atomic.StoreInt32(&isConnected, 0);
-                                                hostConnection.Close();
-                                                //conn.Close();
-                                                if(atomic.LoadInt32(&signalNextMutex) == 0) {
-                                                    atomic.StoreInt32(&signalNextMutex, 1);
-                                                    close(signalNext);
-                                                }
-log.Printf("[host] SIGNALLED");
-                                                if(atomic.LoadInt32(&signalDoneMutex) == 0) {
-                                                    atomic.StoreInt32(&signalDoneMutex, 1);
-                                                    close(signalDone);
-                                                }
-                                            }
-                                        } ();
-
-                                        var err error;
-                                        clientConnectionWriter := ClientWriter{conn};
-                                        signalConnectionReader := SignalReader{hostConnection};
-                                        _, err = io.Copy(clientConnectionWriter, signalConnectionReader);
-                                        if(err != nil) {
-                                            log.Printf("[host] Error copying data from cluster to host: %v", err);
-                                            //hostConnection.Close();
-                                                if(atomic.LoadInt32(&signalDoneMutex) == 0) {
-                                                    atomic.StoreInt32(&signalDoneMutex, 1);
-                                                    close(signalDone);
-                                                }
-
-                                            return;
+                            // Input: Send data from received connection to host
+                            go func() {
+                                defer func() {
+                                    log.Printf("[host] Closing input host connection...");
+                                    if(atomic.LoadInt32(&isConnected) == 1) {
+                                        atomic.StoreInt32(&isConnected, 0);
+                                        hostConnection.Close();
+                                        //conn.Close();
+                                        if(atomic.LoadInt32(&signalNextMutex) == 0) {
+                                            atomic.StoreInt32(&signalNextMutex, 1);
+                                            close(signalNext);
                                         }
-                                    }();
 
-                                    // Output: send data from host back to the original connection
-                                    go func() {
-                                        defer func() {
-                                            log.Printf("[host] Closing output host connection...");
-                                            if(atomic.LoadInt32(&isConnected) == 1) {
-                                                atomic.StoreInt32(&isConnected, 0);
-                                                hostConnection.Close();
-                                                //conn.Close();
-                                                if(atomic.LoadInt32(&signalNextMutex) == 0) {
-                                                    atomic.StoreInt32(&signalNextMutex, 1);
-                                                    close(signalNext);
-                                                }
+                                        var currentHostsConfigurationCounter int32;
+                                        currentHostsConfigurationCounter = atomic.LoadInt32(&hostsConfigurationCounter);
+                                        if(currentHostsConfigurationCounter >= hostsConfigurationLen) {
 
-                                                if(atomic.LoadInt32(&signalDoneMutex) == 0) {
-                                                    atomic.StoreInt32(&signalDoneMutex, 1);
-                                                    close(signalDone);
-                                                }
-                                            }
-                                        } ();
-
-                                        var err error;
-
-
-                                        log.Printf("[host] Copying to hostConnection %s and conn %s", hostConnection.RemoteAddr(), conn.RemoteAddr());
-                                        _, err = io.Copy(hostConnection, connectionReader);
-                                        if(err != nil) {
-                                            log.Printf("[host] Error copying data from host to cluster: %v", err);
-                                            //hostConnection.Close();
                                             if(atomic.LoadInt32(&signalDoneMutex) == 0) {
                                                 atomic.StoreInt32(&signalDoneMutex, 1);
                                                 close(signalDone);
                                             }
-
-                                            return;
                                         }
-                                    }();
-                                } else {
-                                    log.Printf("Error connecting to %s in mode %s. Message: %v", host, mode, err);
-                                    //err = connection.Close();
-                                    if(err != nil) {
-                                        log.Printf("Error closing connection: %s. Error: %v", connection.RemoteAddr(), err);
                                     }
-                                    if(atomic.LoadInt32(&signalNextMutex) == 0) {
-                                        atomic.StoreInt32(&signalNextMutex, 1);
-                                        close(signalNext);
-                                    }
+                                } ();
 
-                                    var currentHostsConfigurationCounter int32;
-                                    currentHostsConfigurationCounter = atomic.LoadInt32(&hostsConfigurationCounter);
-                                    if(currentHostsConfigurationCounter >= hostsConfigurationLen) {
-                                        log.Printf("No available hosts");
-                                        conn.Close();
-                                        if(atomic.LoadInt32(&signalDoneMutex) == 0) {
+                                var err error;
+                                clientConnectionWriter := ClientWriter{conn};
+                                signalConnectionReader := SignalReader{hostConnection};
+                                _, err = io.Copy(clientConnectionWriter, signalConnectionReader);
+                                if(err != nil) {
+                                    log.Printf("[host] Error copying data from cluster to host: %v", err);
+                                    hostConnection.Close();
+/*                                        if(atomic.LoadInt32(&signalDoneMutex) == 0) {
                                             atomic.StoreInt32(&signalDoneMutex, 1);
                                             close(signalDone);
-                                        }
-                                    }
+                                        }*/
+
                                     return;
                                 }
-                            } (networkMode, ip, connection);
+                            }();
+
+                            // Output: send data from host back to the original connection
+                            go func() {
+                                defer func() {
+                                    log.Printf("[host] Closing output host connection...");
+                                    if(atomic.LoadInt32(&isConnected) == 1) {
+                                        atomic.StoreInt32(&isConnected, 0);
+                                        hostConnection.Close();
+                                        //conn.Close();
+                                        if(atomic.LoadInt32(&signalNextMutex) == 0) {
+                                            atomic.StoreInt32(&signalNextMutex, 1);
+                                            close(signalNext);
+                                        }
+
+                                        var currentHostsConfigurationCounter int32;
+                                        currentHostsConfigurationCounter = atomic.LoadInt32(&hostsConfigurationCounter);
+                                        if(currentHostsConfigurationCounter >= hostsConfigurationLen) {
+
+                                            if(atomic.LoadInt32(&signalDoneMutex) == 0) {
+                                                atomic.StoreInt32(&signalDoneMutex, 1);
+                                                close(signalDone);
+                                            }
+                                        }
+                                    }
+                                } ();
+
+                                var err error;
+
+
+                                log.Printf("[host] Copying to hostConnection %s and conn %s", hostConnection.RemoteAddr(), conn.RemoteAddr());
+                                _, err = io.Copy(hostConnection, connectionReader);
+                                if(err != nil) {
+                                    log.Printf("[host] Error copying data from host to cluster: %v", err);
+                                    hostConnection.Close();
+                                    /*if(atomic.LoadInt32(&signalDoneMutex) == 0) {
+                                        atomic.StoreInt32(&signalDoneMutex, 1);
+                                        close(signalDone);
+                                    }*/
+
+                                    return;
+                                }
+                            }();
                         } else {
-                            log.Printf("[host] Hosts routine for %s, over and out!\n", listener.Addr());
+                            log.Printf("[host] Error connecting to %s in mode %s. Message: %v", host, mode, err);
                             //err = connection.Close();
                             if(err != nil) {
                                 log.Printf("[host] Error closing connection: %s. Error: %v", connection.RemoteAddr(), err);
                             }
                             if(atomic.LoadInt32(&signalNextMutex) == 0) {
+                                log.Printf("[host] Proceeding to next entry");
                                 atomic.StoreInt32(&signalNextMutex, 1);
                                 close(signalNext);
                             }
-                            return;
+
+                            var currentHostsConfigurationCounter int32;
+                            currentHostsConfigurationCounter = atomic.LoadInt32(&hostsConfigurationCounter);
+                            if(currentHostsConfigurationCounter >= hostsConfigurationLen) {
+                                log.Printf("No available hosts");
+                                conn.Close();
+                                if(atomic.LoadInt32(&signalDoneMutex) == 0) {
+                                    atomic.StoreInt32(&signalDoneMutex, 1);
+                                    close(signalDone);
+                                }
+                            }
                         }
-                    } (connection, currentClusterPort);
+                    } else {
+                        log.Printf("[host] Hosts routine for %s, over and out!\n", listener.Addr());
+                        //err = connection.Close();
+                        if(err != nil) {
+                            log.Printf("[host] Error closing connection: %s. Error: %v", connection.RemoteAddr(), err);
+                        }
+                        if(atomic.LoadInt32(&signalNextMutex) == 0) {
+                            atomic.StoreInt32(&signalNextMutex, 1);
+                            close(signalNext);
+                        }
+                        return;
+                    }
                     log.Printf("[host] Waiting on signal next. Current host: %v, %v", ip, port);
                     <-signalNext;
                     log.Printf("[host] Proceeding to the next host");
@@ -1060,6 +1068,7 @@ log.Printf("[host] SIGNALLED");
                 log.Printf("[host] Waiting on signal done");
                 <-signalDone;
                 log.Printf("[host] Exhausted all hosts");
+                connection.Close();
             }
         } (listener, clusterPort);
     }
